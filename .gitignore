@@ -1,0 +1,21 @@
+# Entornos virtuales y cachés de Python
+__pycache__/
+*.py[cod]
+.env
+venv/
+env/
+
+# Archivos de datos pesados (¡Crítico!)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+*.npy
+*.csv
+*.tif
+*.tiff
+*.zip
+
+# Archivos temporales de Colab / Jupyter
+.ipynb_checkpoints/
+.DS_Store
