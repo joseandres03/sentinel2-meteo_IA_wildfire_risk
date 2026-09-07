@@ -14,13 +14,7 @@ RUTA_ESCALADOR = os.path.join(BASE_DIR, 'models', 'robust_scaler_meteo.pkl')
 
 # FASE 0: INGESTA DESDE COPERNICUS
 BBOX_CANARIAS = {
-    "La Gomera": [-17.42, 27.98, -17.04, 28.26],
-    "Tenerife": [-16.94, 27.97, -16.11, 28.59],
-    "Gran Canaria": [-15.83, 27.70, -15.36, 28.18],
-    "La Palma": [-18.00, 28.43, -17.72, 28.85],
-    "El Hierro": [-18.17, 27.62, -17.88, 27.86],
-    "Lanzarote": [-13.91, 28.83, -13.33, 29.26],
-    "Fuerteventura": [-14.52, 28.01, -13.82, 28.76]
+    "Canarias": [-18.16, 27.63, -13.33, 29.42]
 }
 
 def obtener_ultima_imagen_gee(isla, ruta_salida, proyecto_gcp="tfm-bbdd-499813"):
@@ -240,13 +234,15 @@ def exportar_mapa_calor(predicciones, coordenadas, dimensiones_base, perfil_geo,
         
     with np.errstate(invalid='ignore', divide='ignore'):
         mapa_final = np.divide(mapa_riesgo, mapa_conteo)
-        # El mar y zonas vacías pasan a ser NaN para no falsear el mapa
-        mapa_final[mapa_conteo == 0] = np.nan
+        
+    # Aplicamos la máscara válida: todo lo que no sea tierra/vegetación real se vuelve NaN (transparente)
+    mapa_final[~mascara_valida] = np.nan
+    mapa_final = np.nan_to_num(mapa_final, nan=0.0)
         
     perfil_geo.update(
         count=1, 
         dtype=rasterio.float32, 
-        nodata=np.nan,
+        nodata=0,
         compress='lzw'
     )
     
@@ -259,7 +255,7 @@ def exportar_mapa_calor(predicciones, coordenadas, dimensiones_base, perfil_geo,
 # INTERFAZ DE EJECUCION
 if __name__ == "__main__":
 
-    ISLA_OBJETIVO = "La Gomera"
+    ISLA_OBJETIVO = "Canarias"
     PROYECTO_GCP = "tfm-bbdd-499813"
     
     ruta_raw = os.path.join(BASE_DIR, 'data', 'raw', f'satelite_{ISLA_OBJETIVO.replace(" ", "_")}.tif')
@@ -278,7 +274,7 @@ if __name__ == "__main__":
             if len(tensores) > 0:
                 meteo_hoy = [36.0, 12.0, 30.0] 
                 riesgos = ejecutar_inferencia(modelo_ia, scaler_meteo, tensores, meteo_hoy)
-                exportar_mapa_calor(riesgos, coords, dimensiones, perfil, ruta_export)
+                exportar_mapa_calor(riesgos, coords, dimensiones, mascara, perfil, ruta_export)
                 print(f"\n[¡PIPELINE COMPLETADO!] Riesgo máximo detectado: {np.max(riesgos)*100:.2f}%")
             else:
                 print("\n[!] El filtro descartó toda la imagen (sin vegetación válida).")
