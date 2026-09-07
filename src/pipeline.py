@@ -2,9 +2,10 @@ import os
 import numpy as np
 import joblib
 import rasterio
+import ee
+import geemap
 from tensorflow import keras
-import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # CONFIGURACIÓN DE RUTAS
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,44 +23,47 @@ BBOX_CANARIAS = {
     "Fuerteventura": [-14.52, 28.01, -13.82, 28.76]
 }
 
-def obtener_ultima_imagen_copernicus(isla, ruta_salida, usuario_copernicus, password_copernicus):
+def obtener_ultima_imagen_gee(isla, ruta_salida, proyecto_gcp="tfm-bbdd-499813"):
     """
-    Consulta la API OData de Copernicus Data Space Ecosystem para localizar 
-    y descargar la imagen Sentinel-2 L2A más reciente, sin filtros de nubosidad,
-    manteniendo la coherencia con el entrenamiento del modelo predictivo.
+    Se conecta a Google Earth Engine, localiza la órbita más reciente de la isla de interés 
+    y la descarga como GeoTIFF conservando la resolución de 10m y la proyección nativa.
     """
-    print(f"\n[FASE 0] Conectando al hub de Copernicus para: {isla}...")
+    
+    ee.Initialize(project=proyecto_gcp)
+        
     bbox = BBOX_CANARIAS.get(isla)
+    if not bbox:
+        raise ValueError(f"Isla '{isla}' no encontrada en el diccionario espacial.")
+        
+    region = ee.Geometry.Rectangle(bbox)
     
-    # Construcción del polígono para la consulta espacial
-    wkt_polygon = f"POLYGON(({bbox[0]} {bbox[1]}, {bbox[2]} {bbox[1]}, {bbox[2]} {bbox[3]}, {bbox[0]} {bbox[3]}, {bbox[0]} {bbox[1]}))"
+    hoy = datetime.now()
+    hace_un_mes = hoy - timedelta(days=30)
     
-    # Endpoint de búsqueda OData (Sentinel-2 Nivel 2A)
-    url_busqueda = "https://catalogue.dataspace.copernicus.eu/odata/v1/Products"
-    filtro = (
-        f"?$filter=Collection/Name eq 'SENTINEL-2' "
-        f"and Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/OData.CSC.StringAttribute/Value eq 'S2MSI2A') "
-        f"and OData.CSC.Intersects(area=geography'SRID=4326;{wkt_polygon}')"
-        f"&$orderby=ContentDate/Start desc&$top=1"
+    coleccion = (
+        ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+        .filterBounds(region)
+        .filterDate(hace_un_mes.strftime('%Y-%m-%d'), hoy.strftime('%Y-%m-%d'))
+        .sort('system:time_start', False)
     )
     
-    respuesta = requests.get(url_busqueda + filtro)
-    datos = respuesta.json()
+    # Extraemos la imagen más reciente y configuramos las bandas
+    imagen_mas_reciente = coleccion.first()
+    fecha_captura = ee.Date(imagen_mas_reciente.get('system:time_start')).format('YYYY-MM-dd HH:mm:ss').getInfo()
+    print(f"-> Satélite localizado. Fecha de captura: {fecha_captura}")
     
-    if 'value' not in datos or len(datos['value']) == 0:
-        print(f"[!] No se ha encontrado ninguna órbita reciente para {isla}.")
-        return None
+    bandas = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12']
+    proyeccion_nativa = imagen_mas_reciente.select('B2').projection()
+    imagen_alineada = imagen_mas_reciente.select(bandas).setDefaultProjection(proyeccion_nativa)
         
-    producto = datos['value'][0]
-    id_producto = producto['Id']
-    nombre_producto = producto['Name']
-    fecha = producto['ContentDate']['Start']
+    geemap.download_ee_image(
+        image=imagen_alineada,
+        filename=ruta_salida,
+        region=region,
+        scale=10,
+        crs=proyeccion_nativa.crs().getInfo()
+    )
     
-    print(f"-> Satélite localizado: {nombre_producto}")
-    print(f"-> Fecha exacta de captura: {fecha}")
-    
-    url_descarga = f"https://zipper.dataspace.copernicus.eu/odata/v1/Products({id_producto})/$value"
-        
     return ruta_salida
 
 # FASE 1: INICIALIZACIÓN DEL MOTOR MULTIMODAL
@@ -257,35 +261,29 @@ def exportar_mapa_calor(predicciones, coordenadas, dimensiones_base, perfil_geo,
 # INTERFAZ DE EJECUCION
 if __name__ == "__main__":
     
-    # Selección operativa de la isla
     ISLA_OBJETIVO = "La Gomera"
+    PROYECTO_GCP = "tfm-bbdd-499813"
     
-    # Rutas dinámicas
     ruta_raw = os.path.join(BASE_DIR, 'data', 'raw', f'satelite_{ISLA_OBJETIVO.replace(" ", "_")}.tif')
-    ruta_exportacion = os.path.join(BASE_DIR, 'data', 'processed', f'riesgo_{ISLA_OBJETIVO.replace(" ", "_")}.tif')
-    os.makedirs(os.path.dirname(ruta_exportacion), exist_ok=True)
+    ruta_export = os.path.join(BASE_DIR, 'data', 'processed', f'riesgo_{ISLA_OBJETIVO.replace(" ", "_")}.tif')
+    os.makedirs(os.path.dirname(ruta_export), exist_ok=True)
+    os.makedirs(os.path.dirname(ruta_raw), exist_ok=True)
     
     try:
-
-        imagen_descargada = obtener_ultima_imagen_copernicus(ISLA_OBJETIVO, ruta_raw, "tu_usuario", "tu_password")
+        archivo_descargado = obtener_ultima_imagen_gee(ISLA_OBJETIVO, ruta_raw, PROYECTO_GCP)
         
-        if imagen_descargada and os.path.exists(imagen_descargada):
-            
+        if archivo_descargado and os.path.exists(archivo_descargado):
             modelo_ia, scaler_meteo = cargar_motor_inferencia()
-            
-            img, mascara, perfil = procesar_satelital(imagen_descargada)
-            
+            img, mascara, perfil = procesar_satelital(archivo_descargado)
             tensores, coords, dimensiones = generar_parches_espaciales(img, mascara)
             
             if len(tensores) > 0:
                 meteo_hoy = [36.0, 12.0, 30.0] 
                 riesgos = ejecutar_inferencia(modelo_ia, scaler_meteo, tensores, meteo_hoy)
-                
-                exportar_mapa_calor(riesgos, coords, dimensiones, perfil, ruta_exportacion)
+                exportar_mapa_calor(riesgos, coords, dimensiones, perfil, ruta_export)
+                print(f"\n[¡PIPELINE COMPLETADO!] Riesgo máximo detectado: {np.max(riesgos)*100:.2f}%")
             else:
-                print("\n[!] El filtro NDWI/NDVI descartó toda la imagen (sin vegetación válida).")
-        else:
-            print(f"\n[AVISO] Para la prueba manual, coloca tu archivo .tif real renombrado como 'satelite_La_Gomera.tif' en:\n{ruta_raw}")
-            
+                print("\n[!] El filtro descartó toda la imagen (sin vegetación válida).")
+                
     except Exception as e:
         print(f"\n[ERROR CRÍTICO] El sistema se detuvo: {e}")
