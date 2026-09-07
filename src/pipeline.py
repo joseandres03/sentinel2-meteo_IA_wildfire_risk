@@ -14,7 +14,7 @@ RUTA_ESCALADOR = os.path.join(BASE_DIR, 'models', 'robust_scaler_meteo.pkl')
 
 # FASE 0: INGESTA DESDE COPERNICUS
 BBOX_CANARIAS = {
-    "La Gomera": [-17.37, 28.01, -17.09, 28.23],
+    "La Gomera": [-17.42, 27.98, -17.04, 28.26],
     "Tenerife": [-16.94, 27.97, -16.11, 28.59],
     "Gran Canaria": [-15.83, 27.70, -15.36, 28.18],
     "La Palma": [-18.00, 28.43, -17.72, 28.85],
@@ -230,7 +230,6 @@ def exportar_mapa_calor(predicciones, coordenadas, dimensiones_base, perfil_geo,
     print("\n[FASE 5] Promediando solapes y generando GeoTIFF final...")
     filas, columnas = dimensiones_base
     
-    # Lienzos vacíos para acumular riesgos y contar solapes
     mapa_riesgo = np.zeros((filas, columnas), dtype=np.float32)
     mapa_conteo = np.zeros((filas, columnas), dtype=np.float32)
     
@@ -239,16 +238,15 @@ def exportar_mapa_calor(predicciones, coordenadas, dimensiones_base, perfil_geo,
         mapa_riesgo[f:f+tamano, c:c+tamano] += valor_riesgo
         mapa_conteo[f:f+tamano, c:c+tamano] += 1
         
-    # Promedio aritmético ignorando divisiones por cero en el mar
     with np.errstate(invalid='ignore', divide='ignore'):
         mapa_final = np.divide(mapa_riesgo, mapa_conteo)
-        mapa_final = np.nan_to_num(mapa_final, nan=0.0)
+        # El mar y zonas vacías pasan a ser NaN para no falsear el mapa
+        mapa_final[mapa_conteo == 0] = np.nan
         
-    # Adaptación de metadatos para exportar una sola banda de datos
     perfil_geo.update(
         count=1, 
         dtype=rasterio.float32, 
-        nodata=0,
+        nodata=np.nan,
         compress='lzw'
     )
     
@@ -260,7 +258,7 @@ def exportar_mapa_calor(predicciones, coordenadas, dimensiones_base, perfil_geo,
 
 # INTERFAZ DE EJECUCION
 if __name__ == "__main__":
-    
+
     ISLA_OBJETIVO = "La Gomera"
     PROYECTO_GCP = "tfm-bbdd-499813"
     
