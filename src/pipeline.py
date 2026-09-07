@@ -14,7 +14,13 @@ RUTA_ESCALADOR = os.path.join(BASE_DIR, 'models', 'robust_scaler_meteo.pkl')
 
 # FASE 0: INGESTA DESDE COPERNICUS
 BBOX_CANARIAS = {
-    "Canarias": [-18.16, 27.63, -13.33, 29.42]
+    "La Gomera": [-17.42, 27.98, -17.04, 28.26],
+    "Tenerife": [-16.94, 27.97, -16.11, 28.59],
+    "Gran Canaria": [-15.83, 27.70, -15.36, 28.18],
+    "La Palma": [-18.00, 28.43, -17.72, 28.85],
+    "El Hierro": [-18.17, 27.62, -17.88, 27.86],
+    "Lanzarote": [-13.91, 28.83, -13.33, 29.26],
+    "Fuerteventura": [-14.52, 28.01, -13.82, 28.76]
 }
 
 def obtener_ultima_imagen_gee(isla, ruta_salida, proyecto_gcp="tfm-bbdd-499813"):
@@ -205,7 +211,7 @@ def ejecutar_inferencia(modelo, escalador, tensores_satelite, meteo_harmonie):
 
 # FASE 5: RECONSTRUCCIÓN Y EXPORTACIÓN CARTOGRÁFICA
 
-def exportar_mapa_calor(predicciones, coordenadas, dimensiones_base, perfil_geo, ruta_salida, tamano=64):
+def exportar_mapa_calor(predicciones, coordenadas, dimensiones_base, mascara_valida, perfil_geo, ruta_salida, tamano=64):
     """
     Construye el mapa de calor promediando los valores de riesgo en las zonas 
     de solape y exporta el resultado como un archivo GeoTIFF georreferenciado.
@@ -235,7 +241,6 @@ def exportar_mapa_calor(predicciones, coordenadas, dimensiones_base, perfil_geo,
     with np.errstate(invalid='ignore', divide='ignore'):
         mapa_final = np.divide(mapa_riesgo, mapa_conteo)
         
-    # Aplicamos la máscara válida: todo lo que no sea tierra/vegetación real se vuelve NaN (transparente)
     mapa_final[~mascara_valida] = np.nan
     mapa_final = np.nan_to_num(mapa_final, nan=0.0)
         
@@ -255,7 +260,7 @@ def exportar_mapa_calor(predicciones, coordenadas, dimensiones_base, perfil_geo,
 # INTERFAZ DE EJECUCION
 if __name__ == "__main__":
 
-    ISLA_OBJETIVO = "Canarias"
+    ISLA_OBJETIVO = "La Gomera"
     PROYECTO_GCP = "tfm-bbdd-499813"
     
     ruta_raw = os.path.join(BASE_DIR, 'data', 'raw', f'satelite_{ISLA_OBJETIVO.replace(" ", "_")}.tif')
