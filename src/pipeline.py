@@ -3,12 +3,64 @@ import numpy as np
 import joblib
 import rasterio
 from tensorflow import keras
+import requests
+from datetime import datetime
 
 # CONFIGURACIÓN DE RUTAS
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUTA_MODELO = os.path.join(BASE_DIR, 'models', 'modelo_late_fusion_definitivo.keras')
 RUTA_ESCALADOR = os.path.join(BASE_DIR, 'models', 'robust_scaler_meteo.pkl')
 
+# FASE 0: INGESTA DESDE COPERNICUS
+BBOX_CANARIAS = {
+    "La Gomera": [-17.37, 28.01, -17.09, 28.23],
+    "Tenerife": [-16.94, 27.97, -16.11, 28.59],
+    "Gran Canaria": [-15.83, 27.70, -15.36, 28.18],
+    "La Palma": [-18.00, 28.43, -17.72, 28.85],
+    "El Hierro": [-18.17, 27.62, -17.88, 27.86],
+    "Lanzarote": [-13.91, 28.83, -13.33, 29.26],
+    "Fuerteventura": [-14.52, 28.01, -13.82, 28.76]
+}
+
+def obtener_ultima_imagen_copernicus(isla, ruta_salida, usuario_copernicus, password_copernicus):
+    """
+    Consulta la API OData de Copernicus Data Space Ecosystem para localizar 
+    y descargar la imagen Sentinel-2 L2A más reciente, sin filtros de nubosidad,
+    manteniendo la coherencia con el entrenamiento del modelo predictivo.
+    """
+    print(f"\n[FASE 0] Conectando al hub de Copernicus para: {isla}...")
+    bbox = BBOX_CANARIAS.get(isla)
+    
+    # Construcción del polígono para la consulta espacial
+    wkt_polygon = f"POLYGON(({bbox[0]} {bbox[1]}, {bbox[2]} {bbox[1]}, {bbox[2]} {bbox[3]}, {bbox[0]} {bbox[3]}, {bbox[0]} {bbox[1]}))"
+    
+    # Endpoint de búsqueda OData (Sentinel-2 Nivel 2A)
+    url_busqueda = "https://catalogue.dataspace.copernicus.eu/odata/v1/Products"
+    filtro = (
+        f"?$filter=Collection/Name eq 'SENTINEL-2' "
+        f"and Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/OData.CSC.StringAttribute/Value eq 'S2MSI2A') "
+        f"and OData.CSC.Intersects(area=geography'SRID=4326;{wkt_polygon}')"
+        f"&$orderby=ContentDate/Start desc&$top=1"
+    )
+    
+    respuesta = requests.get(url_busqueda + filtro)
+    datos = respuesta.json()
+    
+    if 'value' not in datos or len(datos['value']) == 0:
+        print(f"[!] No se ha encontrado ninguna órbita reciente para {isla}.")
+        return None
+        
+    producto = datos['value'][0]
+    id_producto = producto['Id']
+    nombre_producto = producto['Name']
+    fecha = producto['ContentDate']['Start']
+    
+    print(f"-> Satélite localizado: {nombre_producto}")
+    print(f"-> Fecha exacta de captura: {fecha}")
+    
+    url_descarga = f"https://zipper.dataspace.copernicus.eu/odata/v1/Products({id_producto})/$value"
+        
+    return ruta_salida
 
 # FASE 1: INICIALIZACIÓN DEL MOTOR MULTIMODAL
 
@@ -62,42 +114,178 @@ def procesar_satelital(ruta):
     b4_red   = imagen_bruta[:, :, 2]
     b8_nir   = imagen_bruta[:, :, 3]
     
-    # 1. Filtro de Agua (NDWI <= 0.3 es Tierra)
+    # Filtro de agua (NDWI <= 0.3 es tierra)
     ndwi = (b3_green - b8_nir) / (b3_green + b8_nir + 1e-8)
     mascara_tierra = ndwi <= 0.3
     
-    # 2. Filtro Urbano/Roca (NDVI > 0.1 es Vegetación)
+    # Filtro urbano/roca (NDVI > 0.1 es vegetación)
     ndvi = (b8_nir - b4_red) / (b8_nir + b4_red + 1e-8)
     mascara_vegetacion = ndvi > 0.1
     
-    # Máscara maestra: Solo predecimos donde hay tierra Y vegetación
+    # Máscara: Solo predecimos donde hay tierra Y vegetación
     mascara_valida = mascara_tierra & mascara_vegetacion
     
     return imagen_bruta, mascara_valida, perfil_geo
 
-# Bloque de prueba del Pipeline
-if __name__ == "__main__":
-    print("--- INICIANDO TEST DEL PIPELINE ---")
+# FASE 3: VENTANA DESLIZANTE (SLIDING WINDOW)
+
+def generar_parches_espaciales(imagen_bruta, mascara_valida, tamano=64, solape=32):
+    """
+    Recorre la imagen satelital utilizando una ventana deslizante para extraer teselas.
     
-    # Test Fase 1
-    try:
-        modelo_ia, scaler_meteo = cargar_motor_inferencia()
-        print("ÉXITO: Fase 1 completada. Motor cargado.\n")
-    except Exception as e:
-        print(f"ERROR EN FASE 1: {e}\n")
+    Aplica un filtrado espacial dinámico evaluando la matriz booleana de validez.
+    Solo se extraen los parches si la cobertura de vegetación supera un umbral 
+    mínimo (10%), optimizando el coste computacional al ignorar cuadrantes que 
+    representan masa oceánica o suelo urbano desnudo.
+
+    Args:
+        imagen_bruta (np.ndarray): Tensor tridimensional de la imagen completa 
+            (filas, columnas, bandas).
+        mascara_valida (np.ndarray): Matriz booleana bidimensional donde True 
+            indica píxeles aptos para la inferencia de riesgo forestal.
+        tamano (int, opcional): Lado del cuadrante en píxeles. Por defecto 64.
+        solape (int, opcional): Píxeles de superposición entre ventanas adyacentes 
+            para garantizar continuidad geográfica espacial. Por defecto 32.
+
+    Returns:
+        tuple: 
+            - np.ndarray: Matriz de tensores satelitales válidos extraídos.
+            - list: Lista de tuplas (fila, columna) indicando la coordenada de origen 
+              de cada parche para la posterior reconstrucción cartográfica.
+            - tuple: Dimensiones originales de la imagen (filas_totales, cols_totales).
+    """
+    print("\n[FASE 3] Iniciando escáner de ventana deslizante...")
+    filas_totales, cols_totales, _ = imagen_bruta.shape
+    paso = tamano - solape
+    
+    parches = []
+    coordenadas = []
+    
+    for f in range(0, filas_totales - tamano + 1, paso):
+        for c in range(0, cols_totales - tamano + 1, paso):
+            mascara_parche = mascara_valida[f:f+tamano, c:c+tamano]
+            
+            if np.mean(mascara_parche) > 0.1:
+                parches.append(imagen_bruta[f:f+tamano, c:c+tamano, :])
+                coordenadas.append((f, c))
+                
+    print(f"-> Se han recortado {len(parches)} cuadrantes válidos de {tamano}x{tamano}.")
+    return np.array(parches), coordenadas, (filas_totales, cols_totales)
+
+# FASE 4: INYECCIÓN METEO E INFERENCIA RED NEURONAL
+
+def ejecutar_inferencia(modelo, escalador, tensores_satelite, meteo_harmonie):
+    """
+    Fusiona los datos satelitales con las variables meteorológicas para ejecutar 
+    la predicción del modelo de Deep Learning (Late Fusion).
+    
+    Escala las variables meteorológicas continuas utilizando el Robust-Scaler
+    pre-entrenado y las inyecta como un vector replicado para emparejarse 
+    con cada parche espacial durante la propagación hacia adelante de la red neuronal.
+
+    Args:
+        modelo (keras.Model): Arquitectura neuronal multimodal cargada en memoria.
+        escalador (sklearn.preprocessing.RobustScaler): Métrica matemática para 
+            estandarizar temperatura, humedad y viento.
+        tensores_satelite (np.ndarray): Lote (batch) de parches satelitales.
+        meteo_harmonie (list o np.ndarray): Vector 1D con las condiciones 
+            termodinámicas [Temperatura_2m, Humedad_Relativa, Velocidad_Viento].
+
+    Returns:
+        np.ndarray: Vector columna con las probabilidades continuas de riesgo 
+            de incendio (escala 0.0 - 1.0) para cada cuadrante procesado.
+    """
+    print("\n[FASE 4] Cruzando datos con AEMET e iniciando inferencia...")
+    
+    meteo_escalada = escalador.transform([meteo_harmonie])
+    
+    num_parches = tensores_satelite.shape[0]
+    meteo_masiva = np.repeat(meteo_escalada, num_parches, axis=0)
+    
+    predicciones = modelo.predict([tensores_satelite, meteo_masiva], batch_size=32)
+    return predicciones
+
+# FASE 5: RECONSTRUCCIÓN Y EXPORTACIÓN CARTOGRÁFICA
+
+def exportar_mapa_calor(predicciones, coordenadas, dimensiones_base, perfil_geo, ruta_salida, tamano=64):
+    """
+    Construye el mapa de calor promediando los valores de riesgo en las zonas 
+    de solape y exporta el resultado como un archivo GeoTIFF georreferenciado.
+
+    Args:
+        predicciones (np.ndarray): Vector con los valores de riesgo predichos por la IA.
+        coordenadas (list): Lista de tuplas (fila, columna) con el origen de cada parche.
+        dimensiones_base (tuple): Tamaño original de la imagen satelital (filas, columnas).
+        perfil_geo (dict): Metadatos espaciales heredados de la imagen Sentinel-2 original.
+        ruta_salida (str): Ruta absoluta donde se guardará el mapa de calor resultante.
+        tamano (int, opcional): Lado del cuadrante en píxeles. Por defecto 64.
+
+    Returns:
+        np.ndarray: Matriz bidimensional final con el riesgo forestal (0 a 1) por píxel.
+    """
+    print("\n[FASE 5] Promediando solapes y generando GeoTIFF final...")
+    filas, columnas = dimensiones_base
+    
+    # Lienzos vacíos para acumular riesgos y contar solapes
+    mapa_riesgo = np.zeros((filas, columnas), dtype=np.float32)
+    mapa_conteo = np.zeros((filas, columnas), dtype=np.float32)
+    
+    for pred, (f, c) in zip(predicciones, coordenadas):
+        valor_riesgo = pred[0]
+        mapa_riesgo[f:f+tamano, c:c+tamano] += valor_riesgo
+        mapa_conteo[f:f+tamano, c:c+tamano] += 1
         
-    # Test Fase 2
-    # Define la ruta a una imagen satelital de prueba (debe ser un .tif real)
-    ruta_imagen_prueba = os.path.join(BASE_DIR, 'data', 'raw', 'satelite_prueba.tif')
+    # Promedio aritmético ignorando divisiones por cero en el mar
+    with np.errstate(invalid='ignore', divide='ignore'):
+        mapa_final = np.divide(mapa_riesgo, mapa_conteo)
+        mapa_final = np.nan_to_num(mapa_final, nan=0.0)
+        
+    # Adaptación de metadatos para exportar una sola banda de datos
+    perfil_geo.update(
+        count=1, 
+        dtype=rasterio.float32, 
+        nodata=0,
+        compress='lzw'
+    )
     
-    if os.path.exists(ruta_imagen_prueba):
-        try:
-            img, mascara, perfil = procesar_satelital(ruta_imagen_prueba)
-            print("ÉXITO: Fase 2 completada.")
-            print(f"Dimensiones del tensor extraído: {img.shape}")
-            print(f"Total de píxeles en la imagen: {img.shape[0] * img.shape[1]}")
-            print(f"Píxeles de vegetación válidos: {np.sum(mascara)}")
-        except Exception as e:
-            print(f"ERROR EN FASE 2: {e}")
-    else:
-        print(f"AVISO: Para probar la Fase 2, guarda una imagen GeoTIFF en:\n{ruta_imagen_prueba}")
+    with rasterio.open(ruta_salida, 'w', **perfil_geo) as dest:
+        dest.write(mapa_final, 1)
+        
+    print(f"-> Mapa de calor georreferenciado guardado en: {ruta_salida}")
+    return mapa_final
+
+# INTERFAZ DE EJECUCION
+if __name__ == "__main__":
+    
+    # Selección operativa de la isla
+    ISLA_OBJETIVO = "La Gomera"
+    
+    # Rutas dinámicas
+    ruta_raw = os.path.join(BASE_DIR, 'data', 'raw', f'satelite_{ISLA_OBJETIVO.replace(" ", "_")}.tif')
+    ruta_exportacion = os.path.join(BASE_DIR, 'data', 'processed', f'riesgo_{ISLA_OBJETIVO.replace(" ", "_")}.tif')
+    os.makedirs(os.path.dirname(ruta_exportacion), exist_ok=True)
+    
+    try:
+
+        imagen_descargada = obtener_ultima_imagen_copernicus(ISLA_OBJETIVO, ruta_raw, "tu_usuario", "tu_password")
+        
+        if imagen_descargada and os.path.exists(imagen_descargada):
+            
+            modelo_ia, scaler_meteo = cargar_motor_inferencia()
+            
+            img, mascara, perfil = procesar_satelital(imagen_descargada)
+            
+            tensores, coords, dimensiones = generar_parches_espaciales(img, mascara)
+            
+            if len(tensores) > 0:
+                meteo_hoy = [36.0, 12.0, 30.0] 
+                riesgos = ejecutar_inferencia(modelo_ia, scaler_meteo, tensores, meteo_hoy)
+                
+                exportar_mapa_calor(riesgos, coords, dimensiones, perfil, ruta_exportacion)
+            else:
+                print("\n[!] El filtro NDWI/NDVI descartó toda la imagen (sin vegetación válida).")
+        else:
+            print(f"\n[AVISO] Para la prueba manual, coloca tu archivo .tif real renombrado como 'satelite_La_Gomera.tif' en:\n{ruta_raw}")
+            
+    except Exception as e:
+        print(f"\n[ERROR CRÍTICO] El sistema se detuvo: {e}")
