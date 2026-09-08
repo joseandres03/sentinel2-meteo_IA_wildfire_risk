@@ -117,7 +117,7 @@ def descargar_meteo_malla(isla, coords_utm):
         "latitude": ",".join(map(str, np.round(malla_lats.flatten(), 4))),
         "longitude": ",".join(map(str, np.round(malla_lons.flatten(), 4))),
         "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
-        "models": "arome_europe",
+        "models": "best_match",
         "timezone": "Atlantic/Canary",
         "forecast_days": 1
     }
