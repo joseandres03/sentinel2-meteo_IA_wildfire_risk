@@ -116,14 +116,18 @@ def descargar_meteo_malla(isla, coords_utm):
     parametros = {
         "latitude": ",".join(map(str, np.round(malla_lats.flatten(), 4))),
         "longitude": ",".join(map(str, np.round(malla_lons.flatten(), 4))),
-        "hourly": ["temperature_2m", "relative_humidity_2m", "wind_speed_10m"],
+        # CORRECCIÓN: Se pasa como un único string separado por comas
+        "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
         "models": "harmonie_arome_europe",
         "timezone": "Atlantic/Canary",
         "forecast_days": 1
     }
     
-    # Petición masiva a la API
     respuesta = requests.get(url, params=parametros).json()
+    
+    # BARRERA DE SEGURIDAD: Captura de errores de la API
+    if isinstance(respuesta, dict) and respuesta.get("error"):
+        raise RuntimeError(f"La API de Open-Meteo rechazó la conexión: {respuesta.get('reason')}")
     
     # El índice 13 corresponde a las 13:00h del día
     t_malla = [loc['hourly']['temperature_2m'][13] for loc in respuesta]
