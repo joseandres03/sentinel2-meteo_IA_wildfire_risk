@@ -149,6 +149,7 @@ def reconstruir_mapa_calor(predicciones, coordenadas, dimensiones_base, m_tierra
     perfil.update(count=1, dtype=rasterio.float32, nodata=np.nan, compress='lzw')
     with rasterio.open(ruta_salida, 'w', **perfil) as dest:
         dest.write(mapa_final, 1)
+    return mapa_final
 
 def exportar_dashboard_png(mapa_riesgo, mascara_tierra, isla, ruta_png):
     """
