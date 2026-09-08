@@ -94,7 +94,7 @@ def descargar_satelite(isla, proyecto_gcp="tfm-bbdd-499813"):
 
 def descargar_meteo_malla(isla, coords_utm):
     """
-    Genera una cuadrícula sobre la isla, descarga el clima (Harmonie-Arome) 
+    Genera una cuadrícula sobre la isla, descarga el clima (AROME) 
     y calcula la interpolación espacial para asignar a cada parche su microclima exacto.
     
     Args:
@@ -104,7 +104,7 @@ def descargar_meteo_malla(isla, coords_utm):
     Returns:
         np.array: Matriz de dimensiones (N_parches, 3) con [Temp, HR, Viento] para cada cuadrante.
     """
-    print(f"\n[PASO 4] Descargando malla Harmonie-Arome e interpolando microclimas...")
+    print(f"\n[PASO 4] Descargando malla AROME e interpolando microclimas...")
     bbox = BBOX_CANARIAS[isla]
     
     # Generamos una malla de 5x5 puntos sobre el Bounding Box de la isla
@@ -116,16 +116,16 @@ def descargar_meteo_malla(isla, coords_utm):
     parametros = {
         "latitude": ",".join(map(str, np.round(malla_lats.flatten(), 4))),
         "longitude": ",".join(map(str, np.round(malla_lons.flatten(), 4))),
-        # CORRECCIÓN: Se pasa como un único string separado por comas
         "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
-        "models": "harmonie_arome_europe",
+        "models": "arome_europe",
         "timezone": "Atlantic/Canary",
         "forecast_days": 1
     }
     
+    # Petición masiva a la API
     respuesta = requests.get(url, params=parametros).json()
     
-    # BARRERA DE SEGURIDAD: Captura de errores de la API
+    # Barrera de seguridad para cazar errores de la API en lugar de romper el código
     if isinstance(respuesta, dict) and respuesta.get("error"):
         raise RuntimeError(f"La API de Open-Meteo rechazó la conexión: {respuesta.get('reason')}")
     
