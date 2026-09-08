@@ -314,10 +314,10 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
 
 def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
     """
-    Genera un archivo HTML interactivo autocontenido (Base64) con muestreo optimizado 
-    para islas grandes (Tenerife, Gran Canaria) evitando saturación de memoria.
+    Genera un archivo HTML interactivo autocontenido (Base64) con dimensiones 
+    exactas compartidas para evitar desfases de alineación en islas grandes.
     """
-    print(f"\n[PASO 8] Construyendo visor web interactivo optimizado para {isla}...")
+    print(f"\n[PASO 8] Construyendo visor web interactivo sincronizado para {isla}...")
     
     ruta_base_png = os.path.join(dir_salida, f"base_rgb_{isla.replace(' ', '_')}.png")
     ruta_riesgo_png = os.path.join(dir_salida, f"capa_riesgo_{isla.replace(' ', '_')}.png")
@@ -325,7 +325,6 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
     
     frontera = ox.geocode_to_gdf(f"{isla}, Canarias, España")
     
-    # 1. Extraer y redimensionar inteligentemente el Color Verdadero (RGB) del Sentinel-2
     with rasterio.open(ruta_raw) as src_raw:
         h_orig, w_orig = src_raw.height, src_raw.width
         max_dim = 2000
@@ -343,19 +342,22 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         extension_utm = [limites.left, limites.right, limites.bottom, limites.top]
         frontera_utm = frontera.to_crs(src_raw.crs)
         
+        # 1. Base de Satélite (Sin bbox_inches='tight' para fijar el lienzo exacto)
         fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
+        ax.set_position([0, 0, 1, 1])
         ax.set_facecolor('white')
         ax.imshow(rgb, extent=extension_utm)
         frontera_utm.boundary.plot(ax=ax, color='black', linewidth=1.5)
         ax.axis('off')
-        plt.savefig(ruta_base_png, bbox_inches='tight', pad_inches=0, facecolor='white')
+        plt.savefig(ruta_base_png, dpi=150, facecolor='white')
         plt.close()
         
-    # 2. Renderizar Capa de Riesgo optimizada al mismo tamaño exacto
     with rasterio.open(ruta_tif_riesgo) as src_riesgo:
         mapa_riesgo = src_riesgo.read(1, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.nearest)
         
+        # 2. Capa de Riesgo (Mismas dimensiones exactas de lienzo)
         fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
+        ax.set_position([0, 0, 1, 1])
         fig.patch.set_alpha(0.0)
         ax.patch.set_alpha(0.0)
         
@@ -365,17 +367,15 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         
         ax.imshow(mapa_riesgo, cmap=cmap, vmin=0.01, vmax=1.0, extent=extension_utm)
         ax.axis('off')
-        plt.savefig(ruta_riesgo_png, bbox_inches='tight', pad_inches=0, transparent=True)
+        plt.savefig(ruta_riesgo_png, dpi=150, transparent=True)
         plt.close()
 
-    # 3. Codificar las imágenes optimizadas en Base64
     with open(ruta_base_png, "rb") as img_file:
         base64_base = base64.b64encode(img_file.read()).decode('utf-8')
         
     with open(ruta_riesgo_png, "rb") as img_file:
         base64_riesgo = base64.b64encode(img_file.read()).decode('utf-8')
         
-    # 4. Ensamblar la página web autónoma
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -415,7 +415,7 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
     with open(ruta_html, 'w', encoding='utf-8') as f:
         f.write(html_content)
         
-    print(f"-> Visor web interactivo generado con éxito en: {ruta_html}")
+    print(f"-> Visor web interactivo sincronizado generado en: {ruta_html}")
 
 # ==========================================
 # EJECUCIÓN DEL PIPELINE
