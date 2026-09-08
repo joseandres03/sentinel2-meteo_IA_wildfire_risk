@@ -4,7 +4,6 @@ import numpy as np
 import joblib
 import geemap
 import rasterio
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from tensorflow import keras
 
@@ -149,31 +148,7 @@ def reconstruir_mapa_calor(predicciones, coordenadas, dimensiones_base, m_tierra
     perfil.update(count=1, dtype=rasterio.float32, nodata=np.nan, compress='lzw')
     with rasterio.open(ruta_salida, 'w', **perfil) as dest:
         dest.write(mapa_final, 1)
-    return mapa_final
 
-def exportar_dashboard_png(mapa_riesgo, mascara_tierra, isla, ruta_png):
-    """
-    Genera un mapa visual de operaciones tipo meteorológico con la silueta 
-    costera en negro y el gradiente térmico, exportándolo como PNG.
-    """
-    
-    plt.figure(figsize=(10, 10), dpi=200)
-    
-    # Configuración de colores
-    cmap = plt.cm.YlOrRd.copy()
-    cmap.set_under('darkgray')       # Valores = 0.0 (Ciudad/Roca) en gris
-    cmap.set_bad('white', alpha=0)   # Valores NaN (Océano) transparentes
-    
-    # Dibujamos el mapa térmico
-    im = plt.imshow(mapa_riesgo, cmap=cmap, vmin=0.01, vmax=1.0)
-     
-    plt.contour(mascara_tierra, levels=[0.5], colors='black', linewidths=1.2)    
-    plt.colorbar(im, label="Probabilidad de Riesgo Forestal (0.0 - 1.0)", shrink=0.7)
-    plt.title(f"Mapa Operativo de Riesgo - {isla} (CECOPIN)", fontsize=15, fontweight='bold')
-    plt.axis('off')    
-    plt.savefig(ruta_png, bbox_inches='tight', transparent=True)
-    plt.close()
-    
 # EJECUCIÓN DEL PIPELINE
 if __name__ == "__main__":
     try:
@@ -185,17 +160,13 @@ if __name__ == "__main__":
         
         if len(tensores) > 0:
             # Ejemplo de vector térmico: 35.5ºC, 15% HR, 25 km/h viento
-            meteo_operativa = [15, 90.0, 5.0] 
+            meteo_operativa = [15.5, 90.0, 5.0] 
             riesgos = predecir_riesgo(tensores, meteo_operativa)
             
-            ruta_export_tif = os.path.join(BASE_DIR, 'data', 'processed', f'riesgo_{isla.replace(" ", "_")}.tif')
-            ruta_export_png = os.path.join(BASE_DIR, 'data', 'processed', f'mapa_{isla.replace(" ", "_")}.png')
-            os.makedirs(os.path.dirname(ruta_export_tif), exist_ok=True)
+            ruta_export = os.path.join(BASE_DIR, 'data', 'processed', f'riesgo_{isla.replace(" ", "_")}.tif')
+            os.makedirs(os.path.dirname(ruta_export), exist_ok=True)
             
-            mapa_final = reconstruir_mapa_calor(riesgos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_tif)
-            
-            exportar_dashboard_png(mapa_final, m_tierra, isla, ruta_export_png)
-            
+            reconstruir_mapa_calor(riesgos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export)
             print(f"\n[SISTEMA COMPLETADO] El índice máximo detectado es: {np.max(riesgos)*100:.2f}%")
         else:
             print("\n[OPERACIÓN ABORTADA] No se detectó cobertura vegetal en el cuadrante de descarga.")
