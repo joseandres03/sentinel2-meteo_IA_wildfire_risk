@@ -278,16 +278,7 @@ def reconstruir_mapa_calor(predicciones, coordenadas, dimensiones_base, m_tierra
     with rasterio.open(ruta_salida, 'w', **perfil) as dest:
         dest.write(mapa_final, 1)
 
-def exportar_dashboard_png(ruta_tif, isla, ruta_png):
-    """
-    Descarga la frontera vectorial oficial de OSM y la superpone al mapa predictivo térmico.
-    
-    Args:
-        ruta_tif (str): Ruta del GeoTIFF procesado en el paso anterior.
-        isla (str): Nombre de la isla.
-        ruta_png (str): Ruta de destino para la exportación visual.
-    """
-    print(f"\n[PASO 7] Descargando frontera vectorial (OSM) y renderizando dashboard...")
+print(f"\n[PASO 7] Renderizando cartografía estática (Dashboard PNG)...")
     frontera = ox.geocode_to_gdf(f"{isla}, Canarias, España")
     
     with rasterio.open(ruta_tif) as src:
@@ -299,18 +290,16 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
         fig, ax = plt.subplots(figsize=(10, 10), dpi=200)
         ax.set_facecolor('white') 
         
-        cmap = plt.cm.YlOrRd.copy()
+        # Paleta de Verde (0.0) a Rojo (1.0)
+        cmap = plt.cm.RdYlGn_r.copy()
         cmap.set_under('darkgray')
         cmap.set_bad('white', alpha=0)
         
-        # Renderizado térmico referenciado
         im = ax.imshow(mapa_riesgo, cmap=cmap, vmin=0.01, vmax=1.0, extent=extension_utm)
-        
-        # Trazo del límite costero oficial
         frontera_utm.boundary.plot(ax=ax, color='black', linewidth=1.0)
     
         plt.colorbar(im, ax=ax, label="Probabilidad de Riesgo Forestal (0.0 - 1.0)", shrink=0.7)
-        ax.set_title(f"Mapa Operativo de Riesgo - {isla}", fontsize=15, fontweight='bold')
+        ax.set_title(f"Mapa Operativo de Riesgo - {isla} (CECOPIN)", fontsize=15, fontweight='bold')
         ax.axis('off')
         
         plt.savefig(ruta_png, bbox_inches='tight', facecolor='white')
@@ -318,8 +307,107 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
         
     print(f"-> Mapa visual guardado en: {ruta_png}")
 
-# EJECUCIÓN DEL PIPELINE
+def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
+    """
+    Genera un archivo HTML interactivo que superpone el riesgo sobre el color verdadero
+    del satélite, controlado por un deslizador de transparencia.
+    """
+    print(f"\n[PASO 8] Construyendo visor web interactivo (Satélite + Riesgo)...")
+    
+    ruta_base_png = os.path.join(dir_salida, f"base_rgb_{isla.replace(' ', '_')}.png")
+    ruta_riesgo_png = os.path.join(dir_salida, f"capa_riesgo_{isla.replace(' ', '_')}.png")
+    ruta_html = os.path.join(dir_salida, f"visor_interactivo_{isla.replace(' ', '_')}.html")
+    
+    frontera = ox.geocode_to_gdf(f"{isla}, Canarias, España")
+    
+    # 1. Extraer Color Verdadero (RGB) del Sentinel-2 crudo
+    with rasterio.open(ruta_raw) as src_raw:
+        # Bandas descargadas: ['B2', 'B3', 'B4', 'B8', 'B11', 'B12']
+        # Índices: 1=Azul, 2=Verde, 3=Rojo
+        b_blue = src_raw.read(1)
+        b_green = src_raw.read(2)
+        b_red = src_raw.read(3)
+        
+        # Ensamblamos y normalizamos la luz para que se vea como una foto real (0-255)
+        rgb = np.dstack((b_red, b_green, b_blue))
+        rgb = np.clip(rgb / 3000.0, 0, 1) 
+        
+        limites = src_raw.bounds
+        extension_utm = [limites.left, limites.right, limites.bottom, limites.top]
+        frontera_utm = frontera.to_crs(src_raw.crs)
+        
+        # Renderizamos el satélite con la línea de costa
+        fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
+        ax.set_facecolor('white')
+        ax.imshow(rgb, extent=extension_utm)
+        frontera_utm.boundary.plot(ax=ax, color='black', linewidth=1.5)
+        ax.axis('off')
+        plt.savefig(ruta_base_png, bbox_inches='tight', pad_inches=0, facecolor='white')
+        plt.close()
+        
+    # 2. Renderizar Capa de Riesgo (100% transparente salvo donde hay riesgo)
+    with rasterio.open(ruta_tif_riesgo) as src_riesgo:
+        mapa_riesgo = src_riesgo.read(1)
+        
+        fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
+        fig.patch.set_alpha(0.0)
+        ax.patch.set_alpha(0.0)
+        
+        cmap = plt.cm.RdYlGn_r.copy()
+        # Hacemos que la roca, ciudad y el agua sean totalmente invisibles
+        cmap.set_under('black', alpha=0.0) 
+        cmap.set_bad('black', alpha=0.0)
+        
+        ax.imshow(mapa_riesgo, cmap=cmap, vmin=0.01, vmax=1.0, extent=extension_utm)
+        ax.axis('off')
+        plt.savefig(ruta_riesgo_png, bbox_inches='tight', pad_inches=0, transparent=True)
+        plt.close()
+        
+    # 3. Ensamblar la página web
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Visor Táctico - {isla}</title>
+        <style>
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; text-align: center; padding: 20px; }}
+            .container {{ display: inline-block; position: relative; margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); background: white; }}
+            .map-layer {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; }}
+            .base-layer {{ position: relative; display: block; max-width: 900px; height: auto; }}
+            .controls {{ margin: 20px auto; padding: 15px; background: white; display: inline-block; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+            input[type=range] {{ width: 300px; vertical-align: middle; margin: 0 15px; }}
+        </style>
+    </head>
+    <body>
+        <h2>🛰️ Análisis Táctico: Riesgo y Cobertura Terrestre - {isla}</h2>
+        <div class="controls">
+            <label><strong>Transparencia del Índice Térmico:</strong></label>
+            Oculto <input type="range" id="opacitySlider" min="0" max="100" value="75"> Visible
+        </div>
+        <br>
+        <div class="container">
+            <img src="{os.path.basename(ruta_base_png)}" class="base-layer">
+            <img src="{os.path.basename(ruta_riesgo_png)}" class="map-layer" id="riskLayer" style="opacity: 0.75;">
+        </div>
+        <script>
+            const slider = document.getElementById('opacitySlider');
+            const riskLayer = document.getElementById('riskLayer');
+            slider.addEventListener('input', function() {{
+                riskLayer.style.opacity = this.value / 100;
+            }});
+        </script>
+    </body>
+    </html>
+    """
+    with open(ruta_html, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+        
+    print(f"-> Archivo web interactivo creado en: {ruta_html}")
 
+# ==========================================
+# EJECUCIÓN DEL PIPELINE
+# ==========================================
 
 if __name__ == "__main__":
     try:
@@ -328,22 +416,22 @@ if __name__ == "__main__":
         ruta_raw = descargar_satelite(isla)
         img_bruta, m_tierra, m_vegetacion, perfil = calcular_mascaras_fisicas(ruta_raw)
         
-        # OBTENCIÓN DE TENSORES: Ahora extraemos también los centroides UTM espaciales
         tensores, coords, coords_utm, dim_base = extraer_parches_solapados(img_bruta, m_vegetacion, perfil, tamano=64, solape=8)
         
         if len(tensores) > 0:
-            # INGESTA CLIMÁTICA: Se crea la matriz local (T, HR, Viento) para cada uno de los tensores
             meteo_matriz = descargar_meteo_malla(isla, coords_utm)
-            
-            # INFERENCIA: La red ingiere tanto la imagen espacial como su microclima asociado
             riesgos = predecir_riesgo(tensores, meteo_matriz)
             
-            ruta_export_tif = os.path.join(BASE_DIR, 'data', 'processed', f'riesgo_{isla.replace(" ", "_")}.tif')
-            ruta_export_png = os.path.join(BASE_DIR, 'data', 'processed', f'mapa_{isla.replace(" ", "_")}.png')
-            os.makedirs(os.path.dirname(ruta_export_tif), exist_ok=True)
+            dir_procesados = os.path.join(BASE_DIR, 'data', 'processed')
+            os.makedirs(dir_procesados, exist_ok=True)
             
+            ruta_export_tif = os.path.join(dir_procesados, f'riesgo_{isla.replace(" ", "_")}.tif')
+            ruta_export_png = os.path.join(dir_procesados, f'mapa_{isla.replace(" ", "_")}.png')
+            
+            # Guardado y generación de gráficos
             reconstruir_mapa_calor(riesgos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_tif)
             exportar_dashboard_png(ruta_export_tif, isla, ruta_export_png)
+            exportar_visor_interactivo(ruta_export_tif, ruta_raw, isla, dir_procesados)
             
             print(f"\n[¡ÉXITO!] Sistema automatizado completado. Riesgo máximo: {np.max(riesgos)*100:.1f}%")
         else:
