@@ -188,10 +188,14 @@ if __name__ == "__main__":
             meteo_operativa = [15, 90.0, 5.0] 
             riesgos = predecir_riesgo(tensores, meteo_operativa)
             
-            ruta_export = os.path.join(BASE_DIR, 'data', 'processed', f'riesgo_{isla.replace(" ", "_")}.tif')
-            os.makedirs(os.path.dirname(ruta_export), exist_ok=True)
+            ruta_export_tif = os.path.join(BASE_DIR, 'data', 'processed', f'riesgo_{isla.replace(" ", "_")}.tif')
+            ruta_export_png = os.path.join(BASE_DIR, 'data', 'processed', f'mapa_{isla.replace(" ", "_")}.png')
+            os.makedirs(os.path.dirname(ruta_export_tif), exist_ok=True)
             
-            reconstruir_mapa_calor(riesgos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export)
+            mapa_final = reconstruir_mapa_calor(riesgos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_tif)
+            
+            exportar_dashboard_png(mapa_final, m_tierra, isla, ruta_export_png)
+            
             print(f"\n[SISTEMA COMPLETADO] El índice máximo detectado es: {np.max(riesgos)*100:.2f}%")
         else:
             print("\n[OPERACIÓN ABORTADA] No se detectó cobertura vegetal en el cuadrante de descarga.")
