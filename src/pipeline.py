@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import griddata
 from datetime import datetime, timedelta
 from tensorflow import keras
+import base64
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUTA_MODELO = os.path.join(BASE_DIR, 'models', 'modelo_late_fusion_definitivo.keras')
@@ -313,10 +314,10 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
 
 def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
     """
-    Genera un archivo HTML interactivo que superpone el riesgo sobre el color verdadero
-    del satélite, controlado por un deslizador de transparencia.
+    Genera un archivo HTML interactivo autocontenido (Base64) que superpone 
+    el riesgo sobre el color verdadero del satélite mediante un deslizador de opacidad.
     """
-    print(f"\n[PASO 8] Construyendo visor web interactivo (Satélite + Riesgo)...")
+    print(f"\n[PASO 8] Construyendo visor web interactivo autocontenido...")
     
     ruta_base_png = os.path.join(dir_salida, f"base_rgb_{isla.replace(' ', '_')}.png")
     ruta_riesgo_png = os.path.join(dir_salida, f"capa_riesgo_{isla.replace(' ', '_')}.png")
@@ -326,13 +327,10 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
     
     # 1. Extraer Color Verdadero (RGB) del Sentinel-2 crudo
     with rasterio.open(ruta_raw) as src_raw:
-        # Bandas descargadas: ['B2', 'B3', 'B4', 'B8', 'B11', 'B12']
-        # Índices: 1=Azul, 2=Verde, 3=Rojo
         b_blue = src_raw.read(1)
         b_green = src_raw.read(2)
         b_red = src_raw.read(3)
         
-        # Ensamblamos y normalizamos la luz para que se vea como una foto real (0-255)
         rgb = np.dstack((b_red, b_green, b_blue))
         rgb = np.clip(rgb / 3000.0, 0, 1) 
         
@@ -340,7 +338,6 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         extension_utm = [limites.left, limites.right, limites.bottom, limites.top]
         frontera_utm = frontera.to_crs(src_raw.crs)
         
-        # Renderizamos el satélite con la línea de costa
         fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
         ax.set_facecolor('white')
         ax.imshow(rgb, extent=extension_utm)
@@ -349,7 +346,7 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         plt.savefig(ruta_base_png, bbox_inches='tight', pad_inches=0, facecolor='white')
         plt.close()
         
-    # 2. Renderizar Capa de Riesgo (100% transparente salvo donde hay riesgo)
+    # 2. Renderizar Capa de Riesgo transparente
     with rasterio.open(ruta_tif_riesgo) as src_riesgo:
         mapa_riesgo = src_riesgo.read(1)
         
@@ -358,7 +355,6 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         ax.patch.set_alpha(0.0)
         
         cmap = plt.cm.RdYlGn_r.copy()
-        # Hacemos que la roca, ciudad y el agua sean totalmente invisibles
         cmap.set_under('black', alpha=0.0) 
         cmap.set_bad('black', alpha=0.0)
         
@@ -366,8 +362,15 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         ax.axis('off')
         plt.savefig(ruta_riesgo_png, bbox_inches='tight', pad_inches=0, transparent=True)
         plt.close()
+
+    # 3. Codificar las imágenes en Base64 para embebidas en el HTML
+    with open(ruta_base_png, "rb") as img_file:
+        base64_base = base64.b64encode(img_file.read()).decode('utf-8')
         
-    # 3. Ensamblar la página web
+    with open(ruta_riesgo_png, "rb") as img_file:
+        base64_riesgo = base64.b64encode(img_file.read()).decode('utf-8')
+        
+    # 4. Ensamblar la página web autónoma
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -376,8 +379,8 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         <title>Visor Táctico - {isla}</title>
         <style>
             body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; text-align: center; padding: 20px; }}
-            .container {{ display: inline-block; position: relative; margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); background: white; }}
-            .map-layer {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; }}
+            .container {{ display: inline-block; position: relative; margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); background: white; border-radius: 6px; overflow: hidden; }}
+            .map-layer {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }}
             .base-layer {{ position: relative; display: block; max-width: 900px; height: auto; }}
             .controls {{ margin: 20px auto; padding: 15px; background: white; display: inline-block; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
             input[type=range] {{ width: 300px; vertical-align: middle; margin: 0 15px; }}
@@ -391,8 +394,8 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         </div>
         <br>
         <div class="container">
-            <img src="{os.path.basename(ruta_base_png)}" class="base-layer">
-            <img src="{os.path.basename(ruta_riesgo_png)}" class="map-layer" id="riskLayer" style="opacity: 0.75;">
+            <img src="data:image/png;base64,{base64_base}" class="base-layer">
+            <img src="data:image/png;base64,{base64_riesgo}" class="map-layer" id="riskLayer" style="opacity: 0.75;">
         </div>
         <script>
             const slider = document.getElementById('opacitySlider');
@@ -407,7 +410,7 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
     with open(ruta_html, 'w', encoding='utf-8') as f:
         f.write(html_content)
         
-    print(f"-> Archivo web interactivo creado en: {ruta_html}")
+    print(f"-> Visor web interactivo generado con éxito en: {ruta_html}")
 
 # ==========================================
 # EJECUCIÓN DEL PIPELINE
