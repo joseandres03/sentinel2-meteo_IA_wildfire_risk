@@ -4,6 +4,7 @@ import numpy as np
 import joblib
 import geemap
 import rasterio
+import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from tensorflow import keras
 
@@ -149,6 +150,29 @@ def reconstruir_mapa_calor(predicciones, coordenadas, dimensiones_base, m_tierra
     with rasterio.open(ruta_salida, 'w', **perfil) as dest:
         dest.write(mapa_final, 1)
 
+def exportar_dashboard_png(mapa_riesgo, mascara_tierra, isla, ruta_png):
+    """
+    Genera un mapa visual de operaciones tipo meteorológico con la silueta 
+    costera en negro y el gradiente térmico, exportándolo como PNG.
+    """
+    
+    plt.figure(figsize=(10, 10), dpi=200)
+    
+    # Configuración de colores
+    cmap = plt.cm.YlOrRd.copy()
+    cmap.set_under('darkgray')       # Valores = 0.0 (Ciudad/Roca) en gris
+    cmap.set_bad('white', alpha=0)   # Valores NaN (Océano) transparentes
+    
+    # Dibujamos el mapa térmico
+    im = plt.imshow(mapa_riesgo, cmap=cmap, vmin=0.01, vmax=1.0)
+     
+    plt.contour(mascara_tierra, levels=[0.5], colors='black', linewidths=1.2)    
+    plt.colorbar(im, label="Probabilidad de Riesgo Forestal (0.0 - 1.0)", shrink=0.7)
+    plt.title(f"Mapa Operativo de Riesgo - {isla} (CECOPIN)", fontsize=15, fontweight='bold')
+    plt.axis('off')    
+    plt.savefig(ruta_png, bbox_inches='tight', transparent=True)
+    plt.close()
+    
 # EJECUCIÓN DEL PIPELINE
 if __name__ == "__main__":
     try:
