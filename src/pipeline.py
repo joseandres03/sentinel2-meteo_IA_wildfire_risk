@@ -160,7 +160,7 @@ if __name__ == "__main__":
         
         if len(tensores) > 0:
             # Ejemplo de vector térmico: 35.5ºC, 15% HR, 25 km/h viento
-            meteo_operativa = [30.5, 20.0, 10.0] 
+            meteo_operativa = [16.5, 70.0, 10.0] 
             riesgos = predecir_riesgo(tensores, meteo_operativa)
             
             ruta_export = os.path.join(BASE_DIR, 'data', 'processed', f'riesgo_{isla.replace(" ", "_")}.tif')
