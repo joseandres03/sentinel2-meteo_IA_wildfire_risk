@@ -4,6 +4,7 @@ import numpy as np
 import joblib
 import geemap
 import rasterio
+import rasterio.enums
 import requests
 import pyproj
 import osmnx as ox
