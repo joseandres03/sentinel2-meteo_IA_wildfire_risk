@@ -310,7 +310,7 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
         frontera_utm.boundary.plot(ax=ax, color='black', linewidth=1.0)
     
         plt.colorbar(im, ax=ax, label="Probabilidad de Riesgo Forestal (0.0 - 1.0)", shrink=0.7)
-        ax.set_title(f"Mapa Operativo de Riesgo - {isla} (CECOPIN)", fontsize=15, fontweight='bold')
+        ax.set_title(f"Mapa Operativo de Riesgo - {isla}", fontsize=15, fontweight='bold')
         ax.axis('off')
         
         plt.savefig(ruta_png, bbox_inches='tight', facecolor='white')
