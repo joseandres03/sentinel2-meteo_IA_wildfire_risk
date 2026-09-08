@@ -278,7 +278,11 @@ def reconstruir_mapa_calor(predicciones, coordenadas, dimensiones_base, m_tierra
     with rasterio.open(ruta_salida, 'w', **perfil) as dest:
         dest.write(mapa_final, 1)
 
-print(f"\n[PASO 7] Renderizando cartografía estática (Dashboard PNG)...")
+def exportar_dashboard_png(ruta_tif, isla, ruta_png):
+    """
+    Descarga la frontera vectorial oficial de OSM y la superpone al mapa predictivo térmico.
+    """
+    print(f"\n[PASO 7] Renderizando cartografía estática (Dashboard PNG)...")
     frontera = ox.geocode_to_gdf(f"{isla}, Canarias, España")
     
     with rasterio.open(ruta_tif) as src:
