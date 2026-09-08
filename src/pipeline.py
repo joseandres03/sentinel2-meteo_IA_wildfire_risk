@@ -187,7 +187,7 @@ def calcular_mascaras_fisicas(ruta):
     
     return imagen_bruta, mascara_tierra, mascara_vegetacion, perfil_geo
 
-def extraer_parches_solapados(imagen_bruta, mascara_vegetacion, perfil, tamano=64, solape=8):
+def extraer_parches_solapados(imagen_bruta, mascara_vegetacion, perfil, tamano=64, solape=4):
     """
     Ejecuta una ventana deslizante con superposición sobre la matriz satelital, 
     calculando la coordenada espacial UTM exacta del centro de cada tensor.
