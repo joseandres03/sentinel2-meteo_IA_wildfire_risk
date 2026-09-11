@@ -317,8 +317,8 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
         ax.set_xlim(limites.left, limites.right)
         ax.set_ylim(limites.bottom, limites.top)
     
-        plt.colorbar(im, ax=ax, label="Probabilidad de Riesgo Forestal (0.0 - 1.0)", shrink=0.7)
-        ax.set_title(f"Mapa de Riesgo - {isla} (CECOPIN)", fontsize=15, fontweight='bold')
+        plt.colorbar(im, ax=ax, label="Probabilidad de riesgo de incendio (0.0 - 1.0)", shrink=0.7)
+        ax.set_title(f"Mapa de riesgo - {isla}", fontsize=15, fontweight='bold')
         ax.axis('off')
         
         plt.savefig(ruta_png, bbox_inches='tight', facecolor='white')
