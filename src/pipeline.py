@@ -357,7 +357,7 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         ax.set_facecolor('white')
         ax.imshow(rgb, extent=extension_utm)
         frontera_utm.boundary.plot(ax=ax, color='black', linewidth=1.5)
-        # BLOQUEO ESTRÍCTO DE COORDENADAS (Previene los errores de encaje en islas grandes)
+        
         ax.set_xlim(limites.left, limites.right)
         ax.set_ylim(limites.bottom, limites.top)
         ax.axis('off')
