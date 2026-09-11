@@ -260,14 +260,17 @@ def reconstruir_mapa_calor(predicciones, coordenadas, dimensiones_base, m_tierra
         ruta_salida (str): Ruta local donde se guardará el GeoTIFF predictivo.
         tamano (int): Tamaño utilizado durante el escaneo.
     """
-    print("\nConsolidando cartografía matricial promediada...")
+    print("Generando cartografía...")
     filas, columnas = dimensiones_base
     mapa_riesgo = np.zeros((filas, columnas), dtype=np.float32)
     mapa_conteo = np.zeros((filas, columnas), dtype=np.float32)
     
     # Acumulamos el riesgo sumando capas superpuestas
     for pred, (f, c) in zip(predicciones, coordenadas):
-        mapa_riesgo[f:f+tamano, c:c+tamano] += pred[0]
+        # DETECCIÓN DINÁMICA: Si es un array de Keras saca el índice 0, si es temperatura usa el número tal cual
+        valor_limpio = pred[0] if isinstance(pred, (list, np.ndarray)) else pred
+        
+        mapa_riesgo[f:f+tamano, c:c+tamano] += valor_limpio
         mapa_conteo[f:f+tamano, c:c+tamano] += 1
         
     # Calculamos el promedio matemático exacto
