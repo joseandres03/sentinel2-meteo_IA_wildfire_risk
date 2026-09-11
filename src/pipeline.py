@@ -95,7 +95,7 @@ def descargar_satelite(isla, proyecto_gcp="tfm-bbdd-499813"):
         crs='EPSG:32628'
     )
     
-    return ruta_salida
+    return ruta_salida, fecha_captura
 
 def descargar_meteo_malla(isla, coords_utm):
     """
