@@ -61,7 +61,7 @@ def descargar_satelite(isla, proyecto_gcp="tfm-bbdd-499813"):
     Returns:
         str: Ruta local donde se ha guardado el GeoTIFF crudo.
     """
-    print(f"\n[PASO 1] Buscando la última imagen de la constelación Sentinel-2 para {isla}...")
+    print(f"\nBuscando la última imagen de la constelación Sentinel-2 para {isla}...")
     ee.Initialize(project=proyecto_gcp)
     
     region = ee.Geometry.Rectangle(BBOX_CANARIAS[isla])
