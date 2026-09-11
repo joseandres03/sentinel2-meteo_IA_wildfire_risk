@@ -61,7 +61,7 @@ def descargar_satelite(isla, proyecto_gcp="tfm-bbdd-499813"):
     Returns:
         str: Ruta local donde se ha guardado el GeoTIFF crudo.
     """
-    print(f"\n[PASO 1] Buscando última imagen de la constelación Sentinel-2 de {isla}...")
+    print(f"\n[PASO 1] Buscando la última imagen de la constelación Sentinel-2 para {isla}...")
     ee.Initialize(project=proyecto_gcp)
     
     region = ee.Geometry.Rectangle(BBOX_CANARIAS[isla])
@@ -107,7 +107,7 @@ def descargar_meteo_malla(isla, coords_utm):
     Returns:
         np.array: Matriz de dimensiones (N_parches, 3) con [Temp, HR, Viento] para cada cuadrante.
     """
-    print(f"\n[PASO 4] Descargando datos meteorológicos del HARMONIE-AROME e interpolando por la geografía...")
+    print(f"\n Descargando datos meteorológicos del HARMONIE-AROME e interpolando por la geografía...")
     bbox = BBOX_CANARIAS[isla]
     
     # Generamos una malla de 5x5 puntos sobre el Bounding Box de la isla
@@ -173,7 +173,7 @@ def calcular_mascaras_fisicas(ruta):
     Returns:
         tuple: (Matriz bruta 3D, Máscara binaria de tierra, Máscara binaria de vegetación, Perfil geoespacial)
     """
-    print(f"\n[PASO 2] Procesando reflectancia y delimitando litoral...")
+    print(f"\nProcesando reflectancia y delimitando el litoral...")
     with rasterio.open(ruta) as src:
         imagen_bruta = np.transpose(src.read(), (1, 2, 0)).astype(np.float32)
         perfil_geo = src.profile
@@ -205,7 +205,7 @@ def extraer_parches_solapados(imagen_bruta, mascara_vegetacion, perfil, tamano=6
     Returns:
         tuple: (Array de tensores, Lista de coordenadas (fila, col), Lista UTM (x, y), Dimensiones base)
     """
-    print(f"\n[PASO 3] Escaneando cuadrícula ({tamano}x{tamano} con solape de {solape}px)...")
+    print(f"\nGenerando los parches a partir de la imagen ({tamano}x{tamano} con solape de {solape}px)...")
     filas_totales, cols_totales, _ = imagen_bruta.shape
     paso = tamano - solape
     parches, coordenadas, coords_utm = [], [], []
@@ -236,7 +236,7 @@ def predecir_riesgo(tensores_satelite, meteo_matriz):
     Returns:
         np.array: Predicciones de probabilidad de riesgo forestal para cada parche.
     """
-    print("\n[PASO 5] Calculando probabilidad de riesgo mediante Late Fusion...")
+    print("\nCalculando la probabilidad de riesgo mediante el modelo...")
     modelo = keras.models.load_model(RUTA_MODELO)
     escalador = joblib.load(RUTA_ESCALADOR)
     
@@ -258,7 +258,7 @@ def reconstruir_mapa_calor(predicciones, coordenadas, dimensiones_base, m_tierra
         ruta_salida (str): Ruta local donde se guardará el GeoTIFF predictivo.
         tamano (int): Tamaño utilizado durante el escaneo.
     """
-    print("\n[PASO 6] Consolidando cartografía matricial promediada...")
+    print("\nConsolidando cartografía matricial promediada...")
     filas, columnas = dimensiones_base
     mapa_riesgo = np.zeros((filas, columnas), dtype=np.float32)
     mapa_conteo = np.zeros((filas, columnas), dtype=np.float32)
@@ -289,7 +289,7 @@ def obtener_cmap_personalizado():
         (0.45, '#FFA500'),  # Naranja (Riesgo moderado)
         (0.60, '#FF0000'),  # Rojo (Riesgo alto)
         (0.85, '#800080'),  # Morado (Riesgo extremo)
-        (1.00, '#F8E6FF')   # Violeta blanquecino (Peligro máximo)
+        (1.00, '#F8E6FF')   # Violeta pálido (Peligro máximo)
     ]
     cmap = LinearSegmentedColormap.from_list("RiesgoCanarias", nodos)
     cmap.set_under('black', alpha=0.0) 
@@ -297,7 +297,7 @@ def obtener_cmap_personalizado():
     return cmap
 
 def exportar_dashboard_png(ruta_tif, isla, ruta_png):
-    print(f"\n[PASO 7] Renderizando cartografía estática (Dashboard PNG)...")
+    print(f"\nRenderizando cartografía...")
     frontera = ox.geocode_to_gdf(f"{isla}, Canarias, España")
     cmap_riesgo = obtener_cmap_personalizado()
     
@@ -318,14 +318,14 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
         ax.set_ylim(limites.bottom, limites.top)
     
         plt.colorbar(im, ax=ax, label="Probabilidad de Riesgo Forestal (0.0 - 1.0)", shrink=0.7)
-        ax.set_title(f"Mapa Operativo de Riesgo - {isla} (CECOPIN)", fontsize=15, fontweight='bold')
+        ax.set_title(f"Mapa de Riesgo - {isla} (CECOPIN)", fontsize=15, fontweight='bold')
         ax.axis('off')
         
         plt.savefig(ruta_png, bbox_inches='tight', facecolor='white')
         plt.close()
 
 def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
-    print(f"\n[PASO 8] Construyendo visor web interactivo sincronizado para {isla}...")
+    print(f"\nConstruyendo visor web para {isla}...")
     
     ruta_base_png = os.path.join(dir_salida, f"base_rgb_{isla.replace(' ', '_')}.png")
     ruta_riesgo_png = os.path.join(dir_salida, f"capa_riesgo_{isla.replace(' ', '_')}.png")
@@ -379,16 +379,16 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         plt.savefig(ruta_riesgo_png, dpi=150, transparent=True)
         plt.close()
 
-    # 3. Generación de Leyenda (Barra de color)
+    # Generación de leyenda (Barra de color)
     fig_leg, ax_leg = plt.subplots(figsize=(8, 1), dpi=100)
     fig_leg.subplots_adjust(bottom=0.5)
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(0, 1), cmap=cmap_riesgo),
                       cax=ax_leg, orientation='horizontal')
-    cb.set_label('Probabilidad de incendio (0.0 a 1.0)', fontsize=12, fontweight='bold')
+    cb.set_label('Riesgo de incendio (0.0 a 1.0)', fontsize=12, fontweight='bold')
     plt.savefig(ruta_leyenda, bbox_inches='tight', transparent=True)
     plt.close()
 
-    # 4. Inyección Base64
+    # Base64
     with open(ruta_base_png, "rb") as f: base64_base = base64.b64encode(f.read()).decode('utf-8')
     with open(ruta_riesgo_png, "rb") as f: base64_riesgo = base64.b64encode(f.read()).decode('utf-8')
     with open(ruta_leyenda, "rb") as f: base64_ley = base64.b64encode(f.read()).decode('utf-8')
