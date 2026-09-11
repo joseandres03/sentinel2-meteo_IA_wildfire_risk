@@ -1,4 +1,6 @@
 import os
+import json
+import base64
 import ee
 import numpy as np
 import joblib
@@ -14,7 +16,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from scipy.interpolate import griddata
 from datetime import datetime, timedelta
 from tensorflow import keras
-import base64
+
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUTA_MODELO = os.path.join(BASE_DIR, 'models', 'modelo_late_fusion_definitivo.keras')
@@ -324,8 +326,8 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
         plt.savefig(ruta_png, bbox_inches='tight', facecolor='white')
         plt.close()
 
-def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
-    print(f"\nConstruyendo visor web para {isla}...")
+def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, dir_salida, fecha_sat):
+    print(f"\nConstruyendo visor web interactivo para {isla}...")
     
     ruta_base_png = os.path.join(dir_salida, f"base_rgb_{isla.replace(' ', '_')}.png")
     ruta_riesgo_png = os.path.join(dir_salida, f"capa_riesgo_{isla.replace(' ', '_')}.png")
@@ -351,24 +353,23 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         extension_utm = [limites.left, limites.right, limites.bottom, limites.top]
         frontera_utm = frontera.to_crs(src_raw.crs)
         
-        # 1. Base de Satélite
-        fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
+        # Base de satélite
+        fig, ax = plt.subplots(figsize=(10, 10), dpi=200)
         ax.set_position([0, 0, 1, 1])
         ax.set_facecolor('white')
         ax.imshow(rgb, extent=extension_utm)
         frontera_utm.boundary.plot(ax=ax, color='black', linewidth=1.5)
-        
         ax.set_xlim(limites.left, limites.right)
         ax.set_ylim(limites.bottom, limites.top)
         ax.axis('off')
-        plt.savefig(ruta_base_png, dpi=150, facecolor='white')
+        plt.savefig(ruta_base_png, dpi=200, facecolor='white')
         plt.close()
         
     with rasterio.open(ruta_tif_riesgo) as src_riesgo:
         mapa_riesgo = src_riesgo.read(1, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.nearest)
         
-        # 2. Capa de Riesgo
-        fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
+        # Capa de riesgo
+        fig, ax = plt.subplots(figsize=(10, 10), dpi=200)
         ax.set_position([0, 0, 1, 1])
         fig.patch.set_alpha(0.0)
         ax.patch.set_alpha(0.0)
@@ -376,17 +377,30 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         ax.set_xlim(limites.left, limites.right)
         ax.set_ylim(limites.bottom, limites.top)
         ax.axis('off')
-        plt.savefig(ruta_riesgo_png, dpi=150, transparent=True)
+        plt.savefig(ruta_riesgo_png, dpi=200, transparent=True)
         plt.close()
 
-    # Generación de leyenda (Barra de color)
-    fig_leg, ax_leg = plt.subplots(figsize=(8, 1), dpi=100)
+    # leyenda
+    fig_leg, ax_leg = plt.subplots(figsize=(8, 1), dpi=150)
     fig_leg.subplots_adjust(bottom=0.5)
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(0, 1), cmap=cmap_riesgo),
                       cax=ax_leg, orientation='horizontal')
     cb.set_label('Riesgo de incendio (0.0 a 1.0)', fontsize=12, fontweight='bold')
     plt.savefig(ruta_leyenda, bbox_inches='tight', transparent=True)
     plt.close()
+
+    # Datos (JSON) para las ventanas flotantes interactivas
+    with rasterio.open(ruta_tif_riesgo) as src_r, rasterio.open(ruta_tif_temp) as src_t:
+        factor_json = max(1, max(h_orig, w_orig) // 250) 
+        h_j, w_j = h_orig // factor_json, w_orig // factor_json
+        
+        arr_r = src_r.read(1, out_shape=(h_j, w_j), resampling=rasterio.enums.Resampling.nearest)
+        arr_t = src_t.read(1, out_shape=(h_j, w_j), resampling=rasterio.enums.Resampling.nearest)
+        
+        # Formateamos valores inválidos para que JS los detecte como espacios vacíos
+        json_r = json.dumps(np.nan_to_num(arr_r, nan=-1.0).round(2).tolist())
+        json_t = json.dumps(np.nan_to_num(arr_t, nan=-99.0).round(1).tolist())
+
 
     # Base64
     with open(ruta_base_png, "rb") as f: base64_base = base64.b64encode(f.read()).decode('utf-8')
@@ -398,35 +412,78 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
     <html>
     <head>
         <meta charset="utf-8">
-        <title>Visor Táctico - {isla}</title>
+        <title>Visor riesgo de incendio para {isla}</title>
         <style>
             body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; text-align: center; padding: 20px; }}
-            .container {{ display: inline-block; position: relative; margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); background: white; border-radius: 6px; overflow: hidden; max-width: 900px; }}
+            .container {{ display: inline-block; position: relative; margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); background: white; border-radius: 6px; overflow: hidden; max-width: 900px; cursor: crosshair; }}
             .map-layer {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }}
             .base-layer {{ position: relative; display: block; width: 100%; height: auto; }}
             .controls {{ margin: 20px auto; padding: 15px; background: white; display: inline-block; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
             input[type=range] {{ width: 300px; vertical-align: middle; margin: 0 15px; }}
             .legend {{ margin-top: 15px; max-width: 400px; height: auto; }}
+            #tooltip {{ position: absolute; background: rgba(0,0,0,0.85); color: #fff; padding: 8px 12px; border-radius: 5px; font-size: 14px; display: none; z-index: 100; pointer-events: none; text-align: left; box-shadow: 0px 4px 6px rgba(0,0,0,0.3); }}
         </style>
     </head>
     <body>
-        <h2>🛰️ Análisis del riesgo de incendio para - {isla}</h2>
+        <div id="tooltip"></div>
+        <h2> Riesgo y cobertura terrestre para {isla}</h2>
+        <p style="color: #555; font-size: 15px; margin-top: -10px; margin-bottom: 20px;">
+            <strong>🛰️ Fecha Satélite:</strong> {fecha_sat} &nbsp;&nbsp;|&nbsp;&nbsp; <strong>⏱️ Día de la previsión:</strong> {fecha_calc}
+        </p>
+        
         <div class="controls">
-            <label><strong>Transparencia del riesgo de incendio:</strong></label>
+            <label><strong>Transparencia del mapa de riesgo:</strong></label>
             Oculto <input type="range" id="opacitySlider" min="0" max="100" value="75"> Visible
             <br>
-            <img src="data:image/png;base64,{base64_ley}" class="legend" alt="Leyenda de riesgo">
+            <img src="data:image/png;base64,{base64_ley}" class="legend" alt="Leyenda de Riesgo">
         </div>
         <br>
-        <div class="container">
+        
+        <div class="container" id="mapContainer">
             <img src="data:image/png;base64,{base64_base}" class="base-layer">
             <img src="data:image/png;base64,{base64_riesgo}" class="map-layer" id="riskLayer" style="opacity: 0.75;">
         </div>
+        
         <script>
             const slider = document.getElementById('opacitySlider');
             const riskLayer = document.getElementById('riskLayer');
+            const container = document.getElementById('mapContainer');
+            const tooltip = document.getElementById('tooltip');
+            
+            const riskData = {json_r};
+            const tempData = {json_t};
+            const gridH = {h_j};
+            const gridW = {w_j};
+
             slider.addEventListener('input', function() {{
                 riskLayer.style.opacity = this.value / 100;
+            }});
+            
+            container.addEventListener('mousemove', function(e) {{
+                const rect = container.getBoundingClientRect();
+                let relX = (e.clientX - rect.left) / rect.width;
+                let relY = (e.clientY - rect.top) / rect.height;
+                
+                let gridY = Math.floor(relY * gridH);
+                let gridX = Math.floor(relX * gridW);
+                
+                if (gridY >= 0 && gridY < gridH && gridX >= 0 && gridX < gridW) {{
+                    let r = riskData[gridY][gridX];
+                    let t = tempData[gridY][gridX];
+                    
+                    if (r >= 0) {{
+                        tooltip.style.display = 'block';
+                        tooltip.style.left = (e.pageX + 15) + 'px';
+                        tooltip.style.top = (e.pageY + 15) + 'px';
+                        tooltip.innerHTML = `<strong>Riesgo:</strong> ${{(r * 100).toFixed(1)}}%<br><strong>Temperatura:</strong> ${{t.toFixed(1)}} °C`;
+                    }} else {{
+                        tooltip.style.display = 'none';
+                    }}
+                }}
+            }});
+            
+            container.addEventListener('mouseleave', function() {{
+                tooltip.style.display = 'none';
             }});
         </script>
     </body>
@@ -437,13 +494,13 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         
     print(f"-> Visor web interactivo generado con éxito en: {ruta_html}")
 
-# EJECUCIÓN DEL PIPELINE
-
 if __name__ == "__main__":
     try:
         isla = seleccionar_isla()
         
-        ruta_raw = descargar_satelite(isla)
+        # Extraemos también la fecha del satélite
+        ruta_raw, fecha_satelite = descargar_satelite(isla)
+        print("\nConsolidando cartografía matricial promediada...")
         img_bruta, m_tierra, m_vegetacion, perfil = calcular_mascaras_fisicas(ruta_raw)
         
         tensores, coords, coords_utm, dim_base = extraer_parches_solapados(img_bruta, m_vegetacion, perfil, tamano=64, solape=8)
@@ -452,19 +509,26 @@ if __name__ == "__main__":
             meteo_matriz = descargar_meteo_malla(isla, coords_utm)
             riesgos = predecir_riesgo(tensores, meteo_matriz)
             
+            temperaturas = meteo_matriz[:, 0]
+            
             dir_procesados = os.path.join(BASE_DIR, 'data', 'processed')
             os.makedirs(dir_procesados, exist_ok=True)
             
             ruta_export_tif = os.path.join(dir_procesados, f'riesgo_{isla.replace(" ", "_")}.tif')
+            ruta_export_temp = os.path.join(dir_procesados, f'temp_{isla.replace(" ", "_")}.tif')
             ruta_export_png = os.path.join(dir_procesados, f'mapa_{isla.replace(" ", "_")}.png')
             
             reconstruir_mapa_calor(riesgos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_tif)
-            exportar_dashboard_png(ruta_export_tif, isla, ruta_export_png)
-            exportar_visor_interactivo(ruta_export_tif, ruta_raw, isla, dir_procesados)
             
-            print(f"\n[FINALIZADO CON ÉXITO: {np.max(riesgos)*100:.1f}%")
+            reconstruir_mapa_calor(temperaturas, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_temp)
+            
+            exportar_dashboard_png(ruta_export_tif, isla, ruta_export_png)
+            
+            exportar_visor_interactivo(ruta_export_tif, ruta_export_temp, ruta_raw, isla, dir_procesados, fecha_satelite)
+            
+            print(f"\n Finalizado con éxito: {np.max(riesgos)*100:.1f}%")
         else:
-            print("\n[HUBO UN ERROR EN EL PROCESO")
+            print("\n Algo ha fallado")
             
     except Exception as e:
         print(f"\n[ERROR CRÍTICO] {e}")
