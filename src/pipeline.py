@@ -10,6 +10,7 @@ import pyproj
 import osmnx as ox
 import geopandas as gpd
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 from scipy.interpolate import griddata
 from datetime import datetime, timedelta
 from tensorflow import keras
@@ -280,12 +281,25 @@ def reconstruir_mapa_calor(predicciones, coordenadas, dimensiones_base, m_tierra
     with rasterio.open(ruta_salida, 'w', **perfil) as dest:
         dest.write(mapa_final, 1)
 
+def obtener_cmap_personalizado():
+    """Genera la escala térmica a medida según los umbrales operativos."""
+    nodos = [
+        (0.00, '#228B22'),  # Verde bosque oscuro (Riesgo nulo)
+        (0.30, '#ADFF2F'),  # Verde amarillento (Transición)
+        (0.45, '#FFA500'),  # Naranja (Riesgo moderado)
+        (0.60, '#FF0000'),  # Rojo (Riesgo alto)
+        (0.85, '#800080'),  # Morado (Riesgo extremo)
+        (1.00, '#F8E6FF')   # Violeta blanquecino (Peligro máximo)
+    ]
+    cmap = LinearSegmentedColormap.from_list("RiesgoCanarias", nodos)
+    cmap.set_under('black', alpha=0.0) 
+    cmap.set_bad('black', alpha=0.0)
+    return cmap
+
 def exportar_dashboard_png(ruta_tif, isla, ruta_png):
-    """
-    Descarga la frontera vectorial oficial de OSM y la superpone al mapa predictivo térmico.
-    """
     print(f"\n[PASO 7] Renderizando cartografía estática (Dashboard PNG)...")
     frontera = ox.geocode_to_gdf(f"{isla}, Canarias, España")
+    cmap_riesgo = obtener_cmap_personalizado()
     
     with rasterio.open(ruta_tif) as src:
         mapa_riesgo = src.read(1)
@@ -296,13 +310,12 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
         fig, ax = plt.subplots(figsize=(10, 10), dpi=200)
         ax.set_facecolor('white') 
         
-        # Paleta de Verde (0.0) a Rojo (1.0)
-        cmap = plt.cm.RdYlGn_r.copy()
-        cmap.set_under('darkgray')
-        cmap.set_bad('white', alpha=0)
-        
-        im = ax.imshow(mapa_riesgo, cmap=cmap, vmin=0.01, vmax=1.0, extent=extension_utm)
+        im = ax.imshow(mapa_riesgo, cmap=cmap_riesgo, vmin=0.01, vmax=1.0, extent=extension_utm)
         frontera_utm.boundary.plot(ax=ax, color='black', linewidth=1.0)
+        
+        # Bloqueo espacial estricto para evitar desfases de la línea de costa
+        ax.set_xlim(limites.left, limites.right)
+        ax.set_ylim(limites.bottom, limites.top)
     
         plt.colorbar(im, ax=ax, label="Probabilidad de Riesgo Forestal (0.0 - 1.0)", shrink=0.7)
         ax.set_title(f"Mapa Operativo de Riesgo - {isla} (CECOPIN)", fontsize=15, fontweight='bold')
@@ -310,26 +323,21 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
         
         plt.savefig(ruta_png, bbox_inches='tight', facecolor='white')
         plt.close()
-        
-    print(f"-> Mapa visual guardado en: {ruta_png}")
 
 def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
-    """
-    Genera un archivo HTML interactivo autocontenido (Base64) con dimensiones 
-    exactas compartidas para evitar desfases de alineación en islas grandes.
-    """
     print(f"\n[PASO 8] Construyendo visor web interactivo sincronizado para {isla}...")
     
     ruta_base_png = os.path.join(dir_salida, f"base_rgb_{isla.replace(' ', '_')}.png")
     ruta_riesgo_png = os.path.join(dir_salida, f"capa_riesgo_{isla.replace(' ', '_')}.png")
+    ruta_leyenda = os.path.join(dir_salida, f"leyenda_{isla.replace(' ', '_')}.png")
     ruta_html = os.path.join(dir_salida, f"visor_interactivo_{isla.replace(' ', '_')}.html")
     
     frontera = ox.geocode_to_gdf(f"{isla}, Canarias, España")
+    cmap_riesgo = obtener_cmap_personalizado()
     
     with rasterio.open(ruta_raw) as src_raw:
         h_orig, w_orig = src_raw.height, src_raw.width
-        max_dim = 2000
-        factor = max(1, max(h_orig, w_orig) // max_dim)
+        factor = max(1, max(h_orig, w_orig) // 2000)
         h_new, w_new = h_orig // factor, w_orig // factor
         
         b_blue = src_raw.read(1, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
@@ -343,12 +351,15 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         extension_utm = [limites.left, limites.right, limites.bottom, limites.top]
         frontera_utm = frontera.to_crs(src_raw.crs)
         
-        # 1. Base de Satélite (Sin bbox_inches='tight' para fijar el lienzo exacto)
+        # 1. Base de Satélite
         fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
         ax.set_position([0, 0, 1, 1])
         ax.set_facecolor('white')
         ax.imshow(rgb, extent=extension_utm)
         frontera_utm.boundary.plot(ax=ax, color='black', linewidth=1.5)
+        # BLOQUEO ESTRÍCTO DE COORDENADAS (Previene los errores de encaje en islas grandes)
+        ax.set_xlim(limites.left, limites.right)
+        ax.set_ylim(limites.bottom, limites.top)
         ax.axis('off')
         plt.savefig(ruta_base_png, dpi=150, facecolor='white')
         plt.close()
@@ -356,26 +367,31 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
     with rasterio.open(ruta_tif_riesgo) as src_riesgo:
         mapa_riesgo = src_riesgo.read(1, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.nearest)
         
-        # 2. Capa de Riesgo (Mismas dimensiones exactas de lienzo)
+        # 2. Capa de Riesgo
         fig, ax = plt.subplots(figsize=(10, 10), dpi=150)
         ax.set_position([0, 0, 1, 1])
         fig.patch.set_alpha(0.0)
         ax.patch.set_alpha(0.0)
-        
-        cmap = plt.cm.RdYlGn_r.copy()
-        cmap.set_under('black', alpha=0.0) 
-        cmap.set_bad('black', alpha=0.0)
-        
-        ax.imshow(mapa_riesgo, cmap=cmap, vmin=0.01, vmax=1.0, extent=extension_utm)
+        ax.imshow(mapa_riesgo, cmap=cmap_riesgo, vmin=0.01, vmax=1.0, extent=extension_utm)
+        ax.set_xlim(limites.left, limites.right)
+        ax.set_ylim(limites.bottom, limites.top)
         ax.axis('off')
         plt.savefig(ruta_riesgo_png, dpi=150, transparent=True)
         plt.close()
 
-    with open(ruta_base_png, "rb") as img_file:
-        base64_base = base64.b64encode(img_file.read()).decode('utf-8')
-        
-    with open(ruta_riesgo_png, "rb") as img_file:
-        base64_riesgo = base64.b64encode(img_file.read()).decode('utf-8')
+    # 3. Generación de Leyenda (Barra de color)
+    fig_leg, ax_leg = plt.subplots(figsize=(8, 1), dpi=100)
+    fig_leg.subplots_adjust(bottom=0.5)
+    cb = plt.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(0, 1), cmap=cmap_riesgo),
+                      cax=ax_leg, orientation='horizontal')
+    cb.set_label('Probabilidad de Riesgo (0.0 a 1.0)', fontsize=12, fontweight='bold')
+    plt.savefig(ruta_leyenda, bbox_inches='tight', transparent=True)
+    plt.close()
+
+    # 4. Inyección Base64
+    with open(ruta_base_png, "rb") as f: base64_base = base64.b64encode(f.read()).decode('utf-8')
+    with open(ruta_riesgo_png, "rb") as f: base64_riesgo = base64.b64encode(f.read()).decode('utf-8')
+    with open(ruta_leyenda, "rb") as f: base64_ley = base64.b64encode(f.read()).decode('utf-8')
         
     html_content = f"""
     <!DOCTYPE html>
@@ -385,11 +401,12 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         <title>Visor Táctico - {isla}</title>
         <style>
             body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; text-align: center; padding: 20px; }}
-            .container {{ display: inline-block; position: relative; margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); background: white; border-radius: 6px; overflow: hidden; }}
+            .container {{ display: inline-block; position: relative; margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); background: white; border-radius: 6px; overflow: hidden; max-width: 900px; }}
             .map-layer {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }}
-            .base-layer {{ position: relative; display: block; max-width: 900px; height: auto; }}
+            .base-layer {{ position: relative; display: block; width: 100%; height: auto; }}
             .controls {{ margin: 20px auto; padding: 15px; background: white; display: inline-block; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
             input[type=range] {{ width: 300px; vertical-align: middle; margin: 0 15px; }}
+            .legend {{ margin-top: 15px; max-width: 400px; height: auto; }}
         </style>
     </head>
     <body>
@@ -397,6 +414,8 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         <div class="controls">
             <label><strong>Transparencia del Índice Térmico:</strong></label>
             Oculto <input type="range" id="opacitySlider" min="0" max="100" value="75"> Visible
+            <br>
+            <img src="data:image/png;base64,{base64_ley}" class="legend" alt="Leyenda de Riesgo">
         </div>
         <br>
         <div class="container">
@@ -416,11 +435,9 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
     with open(ruta_html, 'w', encoding='utf-8') as f:
         f.write(html_content)
         
-    print(f"-> Visor web interactivo sincronizado generado en: {ruta_html}")
+    print(f"-> Visor web interactivo generado con éxito en: {ruta_html}")
 
-# ==========================================
 # EJECUCIÓN DEL PIPELINE
-# ==========================================
 
 if __name__ == "__main__":
     try:
@@ -441,14 +458,13 @@ if __name__ == "__main__":
             ruta_export_tif = os.path.join(dir_procesados, f'riesgo_{isla.replace(" ", "_")}.tif')
             ruta_export_png = os.path.join(dir_procesados, f'mapa_{isla.replace(" ", "_")}.png')
             
-            # Guardado y generación de gráficos
             reconstruir_mapa_calor(riesgos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_tif)
             exportar_dashboard_png(ruta_export_tif, isla, ruta_export_png)
             exportar_visor_interactivo(ruta_export_tif, ruta_raw, isla, dir_procesados)
             
-            print(f"\n[¡ÉXITO!] Sistema automatizado completado. Riesgo máximo: {np.max(riesgos)*100:.1f}%")
+            print(f"\n[FINALIZADO CON ÉXITO: {np.max(riesgos)*100:.1f}%")
         else:
-            print("\n[OPERACIÓN ABORTADA] No se detectó cobertura vegetal en el cuadrante de descarga.")
+            print("\n[HUBO UN ERROR EN EL PROCESO")
             
     except Exception as e:
         print(f"\n[ERROR CRÍTICO] {e}")
