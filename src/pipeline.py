@@ -331,7 +331,8 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
 
 def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, dir_salida, fecha_sat):
     print(f"\nConstruyendo visor web interactivo para {isla}...")
-    
+
+    fecha_calc = datetime.now().strftime("%Y-%m-%d %H:%M")
     ruta_base_png = os.path.join(dir_salida, f"base_rgb_{isla.replace(' ', '_')}.png")
     ruta_riesgo_png = os.path.join(dir_salida, f"capa_riesgo_{isla.replace(' ', '_')}.png")
     ruta_leyenda = os.path.join(dir_salida, f"leyenda_{isla.replace(' ', '_')}.png")
