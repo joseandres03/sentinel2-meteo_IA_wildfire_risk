@@ -39,7 +39,7 @@ def seleccionar_isla():
     Returns:
         str: Nombre exacto de la isla validado contra el diccionario de BBOX.
     """
-    print("=== SISTEMA PREDICTIVO DE INCENDIOS CECOPIN ===")
+    print("Modelo probabilistico de riesgo de incendio con Deep Learning")
     print("Islas disponibles:", ", ".join(BBOX_CANARIAS.keys()))
     
     isla = input("\nIntroduce la isla a analizar: ").strip()
@@ -61,7 +61,7 @@ def descargar_satelite(isla, proyecto_gcp="tfm-bbdd-499813"):
     Returns:
         str: Ruta local donde se ha guardado el GeoTIFF crudo.
     """
-    print(f"\n[PASO 1] Buscando última imagen despejada de {isla} en Earth Engine...")
+    print(f"\n[PASO 1] Buscando última imagen de la constelación Sentinel-2 de {isla}...")
     ee.Initialize(project=proyecto_gcp)
     
     region = ee.Geometry.Rectangle(BBOX_CANARIAS[isla])
@@ -76,7 +76,7 @@ def descargar_satelite(isla, proyecto_gcp="tfm-bbdd-499813"):
     
     ultima_imagen = coleccion.sort('system:time_start', False).first()
     fecha_captura = ee.Date(ultima_imagen.get('system:time_start')).format('YYYY-MM-dd').getInfo()
-    print(f"-> Última pasada detectada: {fecha_captura}. Ensamblando mosaico insular...")
+    print(f"-> Última imagen obtenida el: {fecha_captura}")
     
     imagen_mosaico = coleccion.sort('system:time_start', True).mosaic()
     imagen_export = imagen_mosaico.select(['B2', 'B3', 'B4', 'B8', 'B11', 'B12'])
@@ -84,7 +84,7 @@ def descargar_satelite(isla, proyecto_gcp="tfm-bbdd-499813"):
     ruta_salida = os.path.join(BASE_DIR, 'data', 'raw', f'satelite_{isla.replace(" ", "_")}.tif')
     os.makedirs(os.path.dirname(ruta_salida), exist_ok=True)
     
-    print("-> Descargando GeoTIFF rectificado (6 bandas a 10m de resolución)...")
+    print("-> Descargando GeoTIFF...")
     geemap.download_ee_image(
         image=imagen_export,
         filename=ruta_salida,
@@ -107,7 +107,7 @@ def descargar_meteo_malla(isla, coords_utm):
     Returns:
         np.array: Matriz de dimensiones (N_parches, 3) con [Temp, HR, Viento] para cada cuadrante.
     """
-    print(f"\n[PASO 4] Descargando malla AROME e interpolando microclimas...")
+    print(f"\n[PASO 4] Descargando datos meteorológicos del HARMONIE-AROME e interpolando por la geografía...")
     bbox = BBOX_CANARIAS[isla]
     
     # Generamos una malla de 5x5 puntos sobre el Bounding Box de la isla
@@ -384,7 +384,7 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
     fig_leg.subplots_adjust(bottom=0.5)
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(0, 1), cmap=cmap_riesgo),
                       cax=ax_leg, orientation='horizontal')
-    cb.set_label('Probabilidad de Riesgo (0.0 a 1.0)', fontsize=12, fontweight='bold')
+    cb.set_label('Probabilidad de incendio (0.0 a 1.0)', fontsize=12, fontweight='bold')
     plt.savefig(ruta_leyenda, bbox_inches='tight', transparent=True)
     plt.close()
 
@@ -410,12 +410,12 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_raw, isla, dir_salida):
         </style>
     </head>
     <body>
-        <h2>🛰️ Análisis Táctico: Riesgo y Cobertura Terrestre - {isla}</h2>
+        <h2>🛰️ Análisis del riesgo de incendio para - {isla}</h2>
         <div class="controls">
-            <label><strong>Transparencia del Índice Térmico:</strong></label>
+            <label><strong>Transparencia del riesgo de incendio:</strong></label>
             Oculto <input type="range" id="opacitySlider" min="0" max="100" value="75"> Visible
             <br>
-            <img src="data:image/png;base64,{base64_ley}" class="legend" alt="Leyenda de Riesgo">
+            <img src="data:image/png;base64,{base64_ley}" class="legend" alt="Leyenda de riesgo">
         </div>
         <br>
         <div class="container">
