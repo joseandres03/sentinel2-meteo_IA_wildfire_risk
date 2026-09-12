@@ -520,8 +520,8 @@ if __name__ == "__main__":
     print("🚀 Iniciando automatización masiva para CECOPIN...")
     
     # Creamos la carpeta web donde irá todo el ecosistema final
-    dir_web = os.path.join(BASE_DIR, 'web')
-    os.makedirs(dir_web, exist_ok=True)
+    dir_docs = os.path.join(BASE_DIR, 'docs')
+    os.makedirs(dir_docs, exist_ok=True)
     
     # Diccionario maestro que alimentará la web automáticamente
     config_web = {
@@ -544,14 +544,14 @@ if __name__ == "__main__":
                 riesgos = predecir_riesgo(tensores, meteo_matriz)
                 temperaturas = meteo_matriz[:, 0]
                 
-                ruta_export_tif = os.path.join(dir_web, f'riesgo_{isla.replace(" ", "_")}.tif')
-                ruta_export_temp = os.path.join(dir_web, f'temp_{isla.replace(" ", "_")}.tif')
+                ruta_export_tif = os.path.join(dir_docs, f'riesgo_{isla.replace(" ", "_")}.tif')
+                ruta_export_temp = os.path.join(dir_docs, f'temp_{isla.replace(" ", "_")}.tif')
                 
                 reconstruir_mapa_calor(riesgos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_tif)
                 reconstruir_mapa_calor(temperaturas, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_temp)
                 
                 # Guardamos las coordenadas dinámicas devueltas por la función
-                bounds_isla = exportar_visor_interactivo(ruta_export_tif, ruta_export_temp, ruta_raw, isla, dir_web, fecha_satelite)
+                bounds_isla = exportar_visor_interactivo(ruta_export_tif, ruta_export_temp, ruta_raw, isla, dir_docs, fecha_satelite)
                 config_web["bounds"][isla] = bounds_isla
                 
                 print(f"\n✅ {isla} completada con éxito. Riesgo máximo: {np.max(riesgos)*100:.1f}%")
@@ -562,6 +562,6 @@ if __name__ == "__main__":
             print(f"\n[ERROR CRÍTICO] Fallo al procesar {isla}: {e}")
             
     # Escritura del archivo de configuración maestro para JavaScript
-    ruta_config = os.path.join(dir_web, 'config.js')
+    ruta_config = os.path.join(dir_docs, 'config.js')
     with open(ruta_config, 'w', encoding='utf-8') as f:
         f.write(f"const configWeb = {json.dumps(config_web, indent=4)};\n")
