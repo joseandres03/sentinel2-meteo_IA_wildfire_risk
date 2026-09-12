@@ -333,26 +333,25 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
         plt.close()
 
 def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, dir_salida, fecha_sat):
-    print(f"\nConstruyendo visor web interactivo y reproyectando capas a EPSG:4326 para {isla}...")
+    print(f"\nConstruyendo visor web interactivo y exportando capas puras para {isla}...")
     
     fecha_calc = datetime.now().strftime("%Y-%m-%d %H:%M")
     
+    ruta_base_png = os.path.join(dir_salida, f"base_rgb_{isla.replace(' ', '_')}.png")
     ruta_riesgo_png = os.path.join(dir_salida, f"capa_riesgo_{isla.replace(' ', '_')}.png")
     ruta_leyenda = os.path.join(dir_salida, f"leyenda_{isla.replace(' ', '_')}.png")
+    ruta_html = os.path.join(dir_salida, f"visor_interactivo_{isla.replace(' ', '_')}.html")
+    ruta_datos_js = os.path.join(dir_salida, f"datos_{isla.replace(' ', '_')}.js")
     
     cmap_riesgo = obtener_cmap_personalizado()
     
-    # 1. REPROYECCIÓN A COORDENADAS ESFÉRICAS (WEB GIS)
+    # PROYECCIÓN A COORDENADAS ESFÉRICAS (WEB GIS)
     with rasterio.open(ruta_tif_riesgo) as src_riesgo:
-        
-        # Calcular la nueva geometría curva
         transform_4326, width_4326, height_4326 = calculate_default_transform(
             src_riesgo.crs, 'EPSG:4326', src_riesgo.width, src_riesgo.height, *src_riesgo.bounds
         )
         
         mapa_4326 = np.zeros((height_4326, width_4326), dtype=np.float32)
-        
-        # Ejecutar la deformación matemática del TIF original a Lat/Lon
         reproject(
             source=rasterio.band(src_riesgo, 1),
             destination=mapa_4326,
@@ -362,8 +361,6 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
             dst_crs='EPSG:4326',
             resampling=Resampling.nearest
         )
-        
-        # Obtener las coordenadas exactas de la nueva matriz web
         lon_min, lat_min, lon_max, lat_max = array_bounds(height_4326, width_4326, transform_4326)
         
         print("\n" + "="*60)
@@ -371,15 +368,33 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
         print(f'"{isla}": [[{lat_min}, {lon_min}], [{lat_max}, {lon_max}]],')
         print("="*60 + "\n")
         
-        # 2. RENDERIZADO DEL PNG PURO (Transparencia perfecta)
+        # Detectar nubes leyendo la banda azul (B2) del satélite
+        with rasterio.open(ruta_raw) as src_raw:
+            banda_azul = np.zeros((height_4326, width_4326), dtype=np.float32)
+            reproject(
+                source=rasterio.band(src_raw, 1),
+                destination=banda_azul,
+                src_transform=src_raw.transform,
+                src_crs=src_raw.crs,
+                dst_transform=transform_4326,
+                dst_crs='EPSG:4326',
+                resampling=Resampling.nearest
+            )
+            # Umbral reflectivo estándar para masa nubosa gruesa
+            mascara_nubes = banda_azul > 2200 
+        
+        # Renderizado del PNG con nubes
         valid_mask = (mapa_4326 >= 0.01) & (~np.isnan(mapa_4326)) & (mapa_4326 != 0.0)
         rgba_img = cmap_riesgo(mapa_4326)
-        rgba_img[~valid_mask, 3] = 0.0
+        rgba_img[~valid_mask, 3] = 0.0 
+        
+        # Aplicamos blanco semitransparente donde hay nubes
+        rgba_img[mascara_nubes] = [1.0, 1.0, 1.0, 0.65] 
         
         img_riesgo = Image.fromarray((rgba_img * 255).astype(np.uint8), 'RGBA')
         img_riesgo.save(ruta_riesgo_png)
 
-    # 3. REPROYECCIÓN DE TEMPERATURAS Y COMPRESIÓN JSON PARA VENTANAS FLOTANTES
+    # PROYECCIÓN Y COMPRESIÓN DE DATOS PARA EL CURSOR DE LA WEB
     with rasterio.open(ruta_tif_temp) as src_t:
         temp_4326 = np.zeros((height_4326, width_4326), dtype=np.float32)
         reproject(
@@ -392,15 +407,19 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
             resampling=Resampling.nearest
         )
         
-        # Muestreo ligero para que el navegador no colapse con el JavaScript
         factor_json = max(1, max(height_4326, width_4326) // 250) 
         arr_r_json = mapa_4326[::factor_json, ::factor_json]
         arr_t_json = temp_4326[::factor_json, ::factor_json]
         
-        json_r = json.dumps(np.nan_to_num(arr_r_json, nan=-1.0).round(2).tolist())
-        json_t = json.dumps(np.nan_to_num(arr_t_json, nan=-99.0).round(1).tolist())
+        # Exportamos variables directas a un script de JS
+        with open(ruta_datos_js, 'w', encoding='utf-8') as f:
+            f.write(f"const datos_{isla.replace(' ', '_')} = {{\n")
+            f.write(f"  riesgo: {json.dumps(np.nan_to_num(arr_r_json, nan=-1.0).round(2).tolist())},\n")
+            f.write(f"  temp: {json.dumps(np.nan_to_num(arr_t_json, nan=-99.0).round(1).tolist())},\n")
+            f.write(f"  gridH: {int(height_4326 // factor_json)},\n")
+            f.write(f"  gridW: {int(width_4326 // factor_json)}\n")
+            f.write("};\n")
 
-    # 4. GENERACIÓN DE LEYENDA
     fig_leg, ax_leg = plt.subplots(figsize=(8, 1), dpi=150)
     fig_leg.subplots_adjust(bottom=0.5)
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(0, 1), cmap=cmap_riesgo),
@@ -409,17 +428,25 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
     plt.savefig(ruta_leyenda, bbox_inches='tight', transparent=True)
     plt.close()
 
-    # 5. CONSTRUCCIÓN DEL HTML LOCAL (Actualizado para usar Leaflet internamente)
+    with rasterio.open(ruta_raw) as src_raw:
+        factor = max(1, max(src_raw.height, src_raw.width) // 2000)
+        h_new, w_new = src_raw.height // factor, src_raw.width // factor
+        b_blue = src_raw.read(1, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
+        b_green = src_raw.read(2, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
+        b_red = src_raw.read(3, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
+        rgb = np.clip(np.dstack((b_red, b_green, b_blue)) / 3000.0, 0, 1) 
+        Image.fromarray((rgb * 255).astype(np.uint8), 'RGB').save(ruta_base_png)
+
+    # CONSTRUCCIÓN DEL HTML LOCAL
     with open(ruta_riesgo_png, "rb") as f: base64_riesgo = base64.b64encode(f.read()).decode('utf-8')
     with open(ruta_leyenda, "rb") as f: base64_ley = base64.b64encode(f.read()).decode('utf-8')
-    ruta_html = os.path.join(dir_salida, f"visor_interactivo_{isla.replace(' ', '_')}.html")
         
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
-        <title>Visor Web Local - {isla}</title>
+        <title>Visor riesgo de incendio - {isla}</title>
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <style>
             body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; text-align: center; margin: 0; padding: 20px; }}
@@ -432,33 +459,25 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
     </head>
     <body>
         <div id="tooltip"></div>
-        <h2> Riesgo Operativo - {isla}</h2>
-        <p style="color: #555; font-size: 15px; margin-top: -10px; margin-bottom: 20px;">
-            <strong>🛰️ Fecha Satélite:</strong> {fecha_sat} &nbsp;&nbsp;|&nbsp;&nbsp; <strong>⏱️ Día de previsión:</strong> {fecha_calc}
-        </p>
-        
+        <h2> Riesgo de incendio - {isla}</h2>
         <div class="controls">
-            <label><strong>Transparencia:</strong></label>
+            <label>Transparencia:</label>
             Oculto <input type="range" id="opacitySlider" min="0" max="100" value="75"> Visible<br>
             <img src="data:image/png;base64,{base64_ley}" alt="Leyenda" style="margin-top:15px; max-width: 400px;">
-        </div><br>
-        
+        </div>
         <div class="container"><div id="map"></div></div>
         
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
             var map = L.map('map').setView([{(lat_min+lat_max)/2}, {(lon_min+lon_max)/2}], 10);
             L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{ maxZoom: 15 }}).addTo(map);
-            
             var bounds = [[{lat_min}, {lon_min}], [{lat_max}, {lon_max}]];
             var riskLayer = L.imageOverlay('data:image/png;base64,{base64_riesgo}', bounds, {{opacity: 0.75}}).addTo(map);
             
-            document.getElementById('opacitySlider').addEventListener('input', function() {{
-                riskLayer.setOpacity(this.value / 100);
-            }});
+            document.getElementById('opacitySlider').addEventListener('input', function() {{ riskLayer.setOpacity(this.value / 100); }});
 
-            const riskData = {json_r};
-            const tempData = {json_t};
+            const riskData = {json.dumps(np.nan_to_num(arr_r_json, nan=-1.0).round(2).tolist())};
+            const tempData = {json.dumps(np.nan_to_num(arr_t_json, nan=-99.0).round(1).tolist())};
             const gridH = {int(height_4326 // factor_json)};
             const gridW = {int(width_4326 // factor_json)};
             const tooltip = document.getElementById('tooltip');
@@ -489,15 +508,15 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
     with open(ruta_html, 'w', encoding='utf-8') as f:
         f.write(html_content)
         
-    print(f"-> Base web generada. Archivo local sincronizado con tecnología Leaflet en: {ruta_html}")
+    print(f"-> Base web generada. Archivo local sincronizado en: {ruta_html}")
 
 if __name__ == "__main__":
     try:
         isla = seleccionar_isla()
         
-        # Extraemos también la fecha del satélite
+        # Extraemos la fecha de la imagen satélite
         ruta_raw, fecha_satelite = descargar_satelite(isla)
-        print("\nConsolidando cartografía matricial promediada...")
+        print("\nConsolidando cartografía...")
         img_bruta, m_tierra, m_vegetacion, perfil = calcular_mascaras_fisicas(ruta_raw)
         
         tensores, coords, coords_utm, dim_base = extraer_parches_solapados(img_bruta, m_vegetacion, perfil, tamano=64, solape=8)
