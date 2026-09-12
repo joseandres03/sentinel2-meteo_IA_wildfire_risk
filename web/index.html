@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prevención de Incendios Forestales</title>
+    
+    <!-- Librería Leaflet para Mapas -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Nuestro estilo personalizado -->
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+    <!-- Panel lateral flotante de controles -->
+    <div id="control-panel">
+        <h2>🔥 Riesgo de incendio</h2>
+        <p class="subtitle">Modelo Deep Learning: Datos de SENTINEL-2 y HARMONIE-AROME)</p>
+        
+        <label for="island-select"><strong>Seleccionar isla:</strong></label>
+        <select id="island-select">
+            <option value="La Gomera">La Gomera</option>
+            <option value="Tenerife">Tenerife</option>
+            <option value="Gran Canaria">Gran Canaria</option>
+            <option value="La Palma">La Palma</option>
+            <option value="El Hierro">El Hierro</option>
+            <option value="Lanzarote">Lanzarote</option>
+            <option value="Fuerteventura">Fuerteventura</option>
+        </select>
+
+        <label for="opacity-slider" style="margin-top: 15px; display:block;"><strong>Transparencio de la capa de riesgo:</strong></label>
+        <input type="range" id="opacity-slider" min="0" max="1" step="0.05" value="0.75">
+        
+        <div id="legend-container">
+            <p style="margin-bottom: 5px; font-size: 0.9em; font-weight: bold;">Nivel de probabilidad</p>
+            <img id="map-legend" src="leyenda_Tenerife.png" alt="Leyenda" style="width: 100%;">
+        </div>
+        
+        <div class="info-box">
+            <p><strong>Última actualización:</strong> <span id="update-date">2026-09-11</span></p>
+            <p style="font-size: 0.8em; color: #666; margin-top: 10px;">Datos obtenidos de AEMET y COPERNICUS</p>
+        </div>
+    </div>
+
+    <!-- Contenedor del mapa a pantalla completa -->
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

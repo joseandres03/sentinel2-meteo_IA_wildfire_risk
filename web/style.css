@@ -1,0 +1,62 @@
+body, html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background-color: #1a1a1a;
+}
+
+#map {
+    width: 100%;
+    height: 100vh; /* Ocupa el 100% de la ventana */
+    z-index: 1;
+}
+
+#control-panel {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    width: 320px;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+    z-index: 1000; /* Para que flote encima del mapa */
+    backdrop-filter: blur(5px);
+}
+
+h2 {
+    margin: 0 0 5px 0;
+    color: #b30000;
+    font-size: 1.5em;
+}
+
+.subtitle {
+    margin: 0 0 20px 0;
+    color: #555;
+    font-size: 0.9em;
+}
+
+select, input[type=range] {
+    width: 100%;
+    padding: 8px;
+    margin-top: 5px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 1em;
+}
+
+#legend-container {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid #ddd;
+}
+
+.info-box {
+    margin-top: 20px;
+    background: #f4f4f4;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 0.9em;
+    border-left: 4px solid #b30000;
+}
