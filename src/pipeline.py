@@ -59,14 +59,7 @@ def seleccionar_isla():
 
 def descargar_satelite(isla, proyecto_gcp="tfm-bbdd-499813"):
     """
-    Descarga la última imagen Sentinel-2 forzando la proyección UTM de Canarias.
-    
-    Args:
-        isla (str): Nombre de la isla a procesar.
-        proyecto_gcp (str): ID del proyecto en Google Cloud para autenticar Earth Engine.
-        
-    Returns:
-        str: Ruta local donde se ha guardado el GeoTIFF crudo.
+    Descarga la última imagen Sentinel-2 de forma síncrona y segura para evitar bloqueos en CI/CD.
     """
     print(f"\nBuscando la última imagen de la constelación Sentinel-2 para {isla}...")
     ee.Initialize(project=proyecto_gcp)
@@ -91,15 +84,24 @@ def descargar_satelite(isla, proyecto_gcp="tfm-bbdd-499813"):
     ruta_salida = os.path.join(BASE_DIR, 'data', 'raw', f'satelite_{isla.replace(" ", "_")}.tif')
     os.makedirs(os.path.dirname(ruta_salida), exist_ok=True)
     
-    print("-> Descargando GeoTIFF...")
-    geemap.download_ee_image(
-        image=imagen_export,
-        filename=ruta_salida,
-        region=region,
-        scale=10,
-        crs='EPSG:32628'
-    )
+    print("-> Descargando GeoTIFF mediante enlace directo seguro...")
+    url_descarga = imagen_export.getDownloadURL({
+        'scale': 10,
+        'crs': 'EPSG:32628',
+        'region': region.getInfo()['coordinates'],
+        'format': 'GEO_TIFF'
+    })
     
+    respuesta = requests.get(url_descarga, stream=True)
+    if respuesta.status_code != 200:
+        raise RuntimeError(f"Error al descargar la imagen de Google Earth Engine: {respuesta.text}")
+        
+    with open(ruta_salida, 'wb') as f:
+        for chunk in respuesta.iter_content(chunk_size=1024*1024):
+            if chunk:
+                f.write(chunk)
+                
+    print(f"-> Descarga completada correctamente para {isla}.")
     return ruta_salida, fecha_captura
 
 def descargar_meteo_malla(isla, coords_utm):
