@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import ee
+import gc
 import numpy as np
 import joblib
 import geemap
@@ -559,6 +560,18 @@ if __name__ == "__main__":
                 
         except Exception as e:
             print(f"\n[ERROR CRÍTICO] Fallo al procesar {isla}: {e}")
+            
+        finally:
+            # Purga de memoria RAM y sesión de Keras para evitar bloqueos por saturación
+            print(f"🧹 Liberando memoria RAM tras procesar {isla}...")
+            if 'img_bruta' in locals(): del img_bruta
+            if 'tensores' in locals(): del tensores
+            if 'riesgos' in locals(): del riesgos
+            if 'meteo_matriz' in locals(): del meteo_matriz
+            if 'm_tierra' in locals(): del m_tierra
+            if 'm_vegetacion' in locals(): del m_vegetacion
+            gc.collect()
+            keras.backend.clear_session()
             
     # Escritura del archivo de configuración maestro para JavaScript
     ruta_config = os.path.join(dir_docs, 'config.js')
