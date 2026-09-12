@@ -10,7 +10,7 @@ L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/
 // Diccionario con los límites geográficos exactos de cada isla
 const boundsCanarias = {
     "La Gomera": [[28.01, -17.37], [28.23, -17.09]],
-    "Tenerife": [[27.97, -16.94], [28.59, -16.11]],
+    "Tenerife": [[27.960755437390954, -16.939844143957302], [28.599334616990024, -16.11008272298364]],
     "Gran Canaria": [[27.70, -15.83], [28.18, -15.36]],
     "La Palma": [[28.43, -18.00], [28.85, -17.72]],
     "El Hierro": [[27.62, -18.17], [27.86, -17.88]],
