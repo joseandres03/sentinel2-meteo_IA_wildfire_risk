@@ -331,8 +331,9 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
 
 def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, dir_salida, fecha_sat):
     print(f"\nConstruyendo visor web interactivo para {isla}...")
-
+    
     fecha_calc = datetime.now().strftime("%Y-%m-%d %H:%M")
+    
     ruta_base_png = os.path.join(dir_salida, f"base_rgb_{isla.replace(' ', '_')}.png")
     ruta_riesgo_png = os.path.join(dir_salida, f"capa_riesgo_{isla.replace(' ', '_')}.png")
     ruta_leyenda = os.path.join(dir_salida, f"leyenda_{isla.replace(' ', '_')}.png")
@@ -356,9 +357,16 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
         limites = src_raw.bounds
         extension_utm = [limites.left, limites.right, limites.bottom, limites.top]
         frontera_utm = frontera.to_crs(src_raw.crs)
+
+        # Cálculo de proporción y extracción de coordenadas web
+        aspect_ratio = (limites.right - limites.left) / (limites.top - limites.bottom)
+        
+        transformador = pyproj.Transformer.from_crs(src_raw.crs, "EPSG:4326", always_xy=True)
+        lon_min, lat_min = transformador.transform(limites.left, limites.bottom)
+        lon_max, lat_max = transformador.transform(limites.right, limites.top)
         
         # Base de satélite
-        fig, ax = plt.subplots(figsize=(10, 10), dpi=200)
+        fig, ax = plt.subplots(figsize=(10 * aspect_ratio, 10), dpi=200)
         ax.set_position([0, 0, 1, 1])
         ax.set_facecolor('white')
         ax.imshow(rgb, extent=extension_utm)
@@ -373,7 +381,7 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
         mapa_riesgo = src_riesgo.read(1, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.nearest)
         
         # Capa de riesgo
-        fig, ax = plt.subplots(figsize=(10, 10), dpi=200)
+        fig, ax = plt.subplots(figsize=(10 * aspect_ratio, 10), dpi=200)
         ax.set_position([0, 0, 1, 1])
         fig.patch.set_alpha(0.0)
         ax.patch.set_alpha(0.0)
@@ -401,10 +409,8 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
         arr_r = src_r.read(1, out_shape=(h_j, w_j), resampling=rasterio.enums.Resampling.nearest)
         arr_t = src_t.read(1, out_shape=(h_j, w_j), resampling=rasterio.enums.Resampling.nearest)
         
-        # Formateamos valores inválidos para que JS los detecte como espacios vacíos
         json_r = json.dumps(np.nan_to_num(arr_r, nan=-1.0).round(2).tolist())
         json_t = json.dumps(np.nan_to_num(arr_t, nan=-99.0).round(1).tolist())
-
 
     # Base64
     with open(ruta_base_png, "rb") as f: base64_base = base64.b64encode(f.read()).decode('utf-8')
