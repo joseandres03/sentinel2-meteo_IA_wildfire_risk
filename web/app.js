@@ -7,7 +7,6 @@ L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/
     maxZoom: 15
 }).addTo(map);
 
-// Diccionario con los límites geográficos exactos de cada isla
 const boundsCanarias = {
     "La Gomera": [[28.01, -17.37], [28.23, -17.09]],
     "Tenerife": [[27.96079606127456, -16.951279043971304], [28.599334616990024, -16.10359428244968]],
@@ -18,70 +17,67 @@ const boundsCanarias = {
     "Fuerteventura": [[28.01, -14.52], [28.76, -13.82]]
 };
 
-// Variable global para almacenar la capa térmica
 let riesgoLayer = null;
 
-// Función para actualizar la isla en la pantalla
 function cargarIsla(nombreIsla) {
     const limites = boundsCanarias[nombreIsla];
-    
-    // Anima el vuelo del mapa hacia la nueva isla
     map.flyToBounds(limites, { duration: 1.5 });
 
-    // Si ya había una capa de riesgo cargada, la borramos para que no se superpongan
     if (riesgoLayer !== null) {
         map.removeLayer(riesgoLayer);
     }
 
-    // Ruta de la imagen transparente que generó el Pipeline
     const nombreFormateado = nombreIsla.replace(' ', '_');
     const rutaImagen = `capa_riesgo_${nombreFormateado}.png`;
     const opacidadActual = document.getElementById('opacity-slider').value;
 
-    // Crear la nueva capa y añadirla al mapa
     riesgoLayer = L.imageOverlay(rutaImagen, limites, {
         opacity: opacidadActual,
-        interactive: false // Para no bloquear el ratón al arrastrar el mapa
+        interactive: false 
     }).addTo(map);
 
-    // Actualizar la leyenda de la interfaz
-    document.getElementById('map-legend').src = `leyenda_${nombreFormateado}.png`;
+    // SISTEMA DE CARGA DINÁMICA (Lazy Loading) DE LOS DATOS MATRICIALES
+    const scriptId = 'script-datos-' + nombreFormateado;
+    if (!document.getElementById(scriptId)) {
+        const script = document.createElement('script');
+        script.id = scriptId;
+        script.src = `datos_${nombreFormateado}.js`;
+        document.body.appendChild(script);
+    }
 }
 
-// Escuchar cambios en el selector de isla
 document.getElementById('island-select').addEventListener('change', function(e) {
     cargarIsla(e.target.value);
 });
 
-// Escuchar cambios en la barra de opacidad
 document.getElementById('opacity-slider').addEventListener('input', function(e) {
     if (riesgoLayer !== null) {
         riesgoLayer.setOpacity(e.target.value);
     }
 });
 
-// 7. Panel de Datos flotante con el cursor
+// Panel de Datos flotante con el cursor
 const tooltip = document.getElementById('tooltip');
 
 map.on('mousemove', function(e) {
     if (!riesgoLayer) return;
     
-    // Obtenemos los límites y datos de la isla actual
     const nombreIsla = document.getElementById('island-select').value;
     const nombreFormateado = nombreIsla.replace(' ', '_');
     const limites = boundsCanarias[nombreIsla];
+    
+    // Ahora recuperamos los datos del objeto global inyectado por Python
     const data = window['datos_' + nombreFormateado];
     
     if (!data) return;
 
-    // Calcular el porcentaje de posición GPS sobre el lienzo
     const latMin = limites[0][0];
     const lonMin = limites[0][1];
     const latMax = limites[1][0];
     const lonMax = limites[1][1];
     
     const pctX = (e.latlng.lng - lonMin) / (lonMax - lonMin);
-    const pctY = (latMax - e.latlng.lat) / (latMax - latMin); // Y se invierte de latitud a píxel
+    const pctY = (latMax - e.latlng.lat) / (latMax - latMin); 
     
     let gridX = Math.floor(pctX * data.gridW);
     let gridY = Math.floor(pctY * data.gridH);
@@ -107,5 +103,4 @@ map.on('mouseout', function() {
     tooltip.style.display = 'none';
 });
 
-// Cargar Tenerife por defecto al abrir la web
 cargarIsla("Tenerife");
