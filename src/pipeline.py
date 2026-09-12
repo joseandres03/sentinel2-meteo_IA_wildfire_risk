@@ -232,18 +232,14 @@ def extraer_parches_solapados(imagen_bruta, mascara_vegetacion, perfil, tamano=6
     return np.array(parches), coordenadas, coords_utm, (filas_totales, cols_totales)
 
 def predecir_riesgo(tensores_satelite, meteo_matriz):
-    """
-    Inyecta los tensores y la meteorología local escalada al modelo para ejecutar inferencia.
-    
-    Args:
-        tensores_satelite (np.array): Array 4D con los parches satelitales procesados.
-        meteo_matriz (np.array): Matriz 2D (N_parches, 3) con la meteorología interpolada.
-        
-    Returns:
-        np.array: Predicciones de probabilidad de riesgo forestal para cada parche.
-    """
     print("\nCalculando la probabilidad de riesgo mediante el modelo...")
-    modelo = keras.models.load_model(RUTA_MODELO)
+    
+    class SafeDense(keras.layers.Dense):
+        def __init__(self, *args, **kwargs):
+            kwargs.pop('quantization_config', None)
+            super().__init__(*args, **kwargs)
+            
+    modelo = keras.models.load_model(RUTA_MODELO, custom_objects={'Dense': SafeDense})
     escalador = joblib.load(RUTA_ESCALADOR)
     
     meteo_escalada = escalador.transform(meteo_matriz)
