@@ -514,42 +514,54 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
         f.write(html_content)
         
     print(f"-> Base web generada. Archivo local sincronizado en: {ruta_html}")
+    return [[lat_min, lon_min], [lat_max, lon_max]]
 
 if __name__ == "__main__":
-    try:
-        isla = seleccionar_isla()
-        
-        # Extraemos la fecha de la imagen satélite
-        ruta_raw, fecha_satelite = descargar_satelite(isla)
-        print("\nConsolidando cartografía...")
-        img_bruta, m_tierra, m_vegetacion, perfil = calcular_mascaras_fisicas(ruta_raw)
-        
-        tensores, coords, coords_utm, dim_base = extraer_parches_solapados(img_bruta, m_vegetacion, perfil, tamano=64, solape=8)
-        
-        if len(tensores) > 0:
-            meteo_matriz = descargar_meteo_malla(isla, coords_utm)
-            riesgos = predecir_riesgo(tensores, meteo_matriz)
+    print("🚀 Iniciando automatización masiva para CECOPIN...")
+    
+    # Creamos la carpeta web donde irá todo el ecosistema final
+    dir_web = os.path.join(BASE_DIR, 'web')
+    os.makedirs(dir_web, exist_ok=True)
+    
+    # Diccionario maestro que alimentará la web automáticamente
+    config_web = {
+        "bounds": {},
+        "fecha_actualizacion": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+    
+    # Ejecución iterativa para todo el archipiélago
+    for isla in BBOX_CANARIAS.keys():
+        try:
+            print(f"\n{'='*50}\n🛰️ PROCESANDO: {isla}\n{'='*50}")
+            ruta_raw, fecha_satelite = descargar_satelite(isla)
             
-            temperaturas = meteo_matriz[:, 0]
+            print("\nConsolidando cartografía...")
+            img_bruta, m_tierra, m_vegetacion, perfil = calcular_mascaras_fisicas(ruta_raw)
+            tensores, coords, coords_utm, dim_base = extraer_parches_solapados(img_bruta, m_vegetacion, perfil, tamano=64, solape=8)
             
-            dir_procesados = os.path.join(BASE_DIR, 'data', 'processed')
-            os.makedirs(dir_procesados, exist_ok=True)
+            if len(tensores) > 0:
+                meteo_matriz = descargar_meteo_malla(isla, coords_utm)
+                riesgos = predecir_riesgo(tensores, meteo_matriz)
+                temperaturas = meteo_matriz[:, 0]
+                
+                ruta_export_tif = os.path.join(dir_web, f'riesgo_{isla.replace(" ", "_")}.tif')
+                ruta_export_temp = os.path.join(dir_web, f'temp_{isla.replace(" ", "_")}.tif')
+                
+                reconstruir_mapa_calor(riesgos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_tif)
+                reconstruir_mapa_calor(temperaturas, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_temp)
+                
+                # Guardamos las coordenadas dinámicas devueltas por la función
+                bounds_isla = exportar_visor_interactivo(ruta_export_tif, ruta_export_temp, ruta_raw, isla, dir_web, fecha_satelite)
+                config_web["bounds"][isla] = bounds_isla
+                
+                print(f"\n✅ {isla} completada con éxito. Riesgo máximo: {np.max(riesgos)*100:.1f}%")
+            else:
+                print(f"\n⚠️ Operación abortada: No se detectó cobertura vegetal en {isla}.")
+                
+        except Exception as e:
+            print(f"\n[ERROR CRÍTICO] Fallo al procesar {isla}: {e}")
             
-            ruta_export_tif = os.path.join(dir_procesados, f'riesgo_{isla.replace(" ", "_")}.tif')
-            ruta_export_temp = os.path.join(dir_procesados, f'temp_{isla.replace(" ", "_")}.tif')
-            ruta_export_png = os.path.join(dir_procesados, f'mapa_{isla.replace(" ", "_")}.png')
-            
-            reconstruir_mapa_calor(riesgos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_tif)
-            
-            reconstruir_mapa_calor(temperaturas, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_temp)
-            
-            exportar_dashboard_png(ruta_export_tif, isla, ruta_export_png)
-            
-            exportar_visor_interactivo(ruta_export_tif, ruta_export_temp, ruta_raw, isla, dir_procesados, fecha_satelite)
-            
-            print(f"\n Finalizado con éxito: {np.max(riesgos)*100:.1f}%")
-        else:
-            print("\n Algo ha fallado")
-            
-    except Exception as e:
-        print(f"\n[ERROR CRÍTICO] {e}")
+    # Escritura del archivo de configuración maestro para JavaScript
+    ruta_config = os.path.join(dir_web, 'config.js')
+    with open(ruta_config, 'w', encoding='utf-8') as f:
+        f.write(f"const configWeb = {json.dumps(config_web, indent=4)};\n")
