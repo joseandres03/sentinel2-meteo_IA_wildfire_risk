@@ -26,7 +26,7 @@ jobs:
       - name: Instalar Librerías de Python
         run: |
           pip install --upgrade pip
-          pip install earthengine-api geemap geedim numpy rasterio geopandas osmnx shapely pyproj requests matplotlib scipy tensorflow joblib scikit-learn pillow
+          pip install earthengine-api geemap geedim numpy rasterio geopandas osmnx shapely pyproj requests matplotlib scipy tensorflow==2.20.0 joblib scikit-learn pillow
 
       - name: Autenticar Google Earth Engine
         env:
