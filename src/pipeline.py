@@ -524,7 +524,7 @@ if __name__ == "__main__":
     os.makedirs(dir_docs, exist_ok=True)
     
     # Diccionario maestro que alimentará la web automáticamente
-    config_web = {
+    config_docs = {
         "bounds": {},
         "fecha_actualizacion": datetime.now().strftime("%Y-%m-%d %H:%M")
     }
@@ -552,7 +552,7 @@ if __name__ == "__main__":
                 
                 # Guardamos las coordenadas dinámicas devueltas por la función
                 bounds_isla = exportar_visor_interactivo(ruta_export_tif, ruta_export_temp, ruta_raw, isla, dir_docs, fecha_satelite)
-                config_web["bounds"][isla] = bounds_isla
+                config_docs["bounds"][isla] = bounds_isla
                 
                 print(f"\n✅ {isla} completada con éxito. Riesgo máximo: {np.max(riesgos)*100:.1f}%")
             else:
@@ -564,4 +564,4 @@ if __name__ == "__main__":
     # Escritura del archivo de configuración maestro para JavaScript
     ruta_config = os.path.join(dir_docs, 'config.js')
     with open(ruta_config, 'w', encoding='utf-8') as f:
-        f.write(f"const configWeb = {json.dumps(config_web, indent=4)};\n")
+        f.write(f"const configWeb = {json.dumps(config_docs, indent=4)};\n")
