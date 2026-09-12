@@ -363,6 +363,11 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
             resampling=Resampling.nearest
         )
         lon_min, lat_min, lon_max, lat_max = array_bounds(height_4326, width_4326, transform_4326)
+
+        print("\n" + "="*60)
+        print(f"🌍 COORDENADAS EXACTAS PARA LA WEB (app.js) - {isla}:")
+        print(f'"{isla}": [[{lat_min}, {lon_min}], [{lat_max}, {lon_max}]],')
+        print("="*60 + "\n")
         
         # Detectar nubes leyendo la banda azul (B2)
         with rasterio.open(ruta_raw) as src_raw:
