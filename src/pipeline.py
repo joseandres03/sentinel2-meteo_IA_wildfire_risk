@@ -7,6 +7,8 @@ import joblib
 import geemap
 import rasterio
 import rasterio.enums
+from rasterio.warp import calculate_default_transform, reproject, Resampling
+from rasterio.transform import array_bounds
 import requests
 import pyproj
 from PIL import Image
@@ -331,54 +333,74 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
         plt.close()
 
 def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, dir_salida, fecha_sat):
-    print(f"\nConstruyendo visor web interactivo y exportando capas puras para {isla}...")
+    print(f"\nConstruyendo visor web interactivo y reproyectando capas a EPSG:4326 para {isla}...")
     
     fecha_calc = datetime.now().strftime("%Y-%m-%d %H:%M")
     
-    ruta_base_png = os.path.join(dir_salida, f"base_rgb_{isla.replace(' ', '_')}.png")
     ruta_riesgo_png = os.path.join(dir_salida, f"capa_riesgo_{isla.replace(' ', '_')}.png")
     ruta_leyenda = os.path.join(dir_salida, f"leyenda_{isla.replace(' ', '_')}.png")
-    ruta_html = os.path.join(dir_salida, f"visor_interactivo_{isla.replace(' ', '_')}.html")
     
     cmap_riesgo = obtener_cmap_personalizado()
     
+    # 1. REPROYECCIÓN A COORDENADAS ESFÉRICAS (WEB GIS)
     with rasterio.open(ruta_tif_riesgo) as src_riesgo:
-        mapa_riesgo = src_riesgo.read(1)
         
-        # Obtenemos las coordenadas GPS perimetrales exactas para Leaflet
-        transformador = pyproj.Transformer.from_crs(src_riesgo.crs, "EPSG:4326", always_xy=True)
-        lon_min, lat_min = transformador.transform(src_riesgo.bounds.left, src_riesgo.bounds.bottom)
-        lon_max, lat_max = transformador.transform(src_riesgo.bounds.right, src_riesgo.bounds.top)
+        # Calcular la nueva geometría curva
+        transform_4326, width_4326, height_4326 = calculate_default_transform(
+            src_riesgo.crs, 'EPSG:4326', src_riesgo.width, src_riesgo.height, *src_riesgo.bounds
+        )
+        
+        mapa_4326 = np.zeros((height_4326, width_4326), dtype=np.float32)
+        
+        # Ejecutar la deformación matemática del TIF original a Lat/Lon
+        reproject(
+            source=rasterio.band(src_riesgo, 1),
+            destination=mapa_4326,
+            src_transform=src_riesgo.transform,
+            src_crs=src_riesgo.crs,
+            dst_transform=transform_4326,
+            dst_crs='EPSG:4326',
+            resampling=Resampling.nearest
+        )
+        
+        # Obtener las coordenadas exactas de la nueva matriz web
+        lon_min, lat_min, lon_max, lat_max = array_bounds(height_4326, width_4326, transform_4326)
         
         print("\n" + "="*60)
         print(f"🌍 COORDENADAS EXACTAS PARA LA WEB (app.js) - {isla}:")
         print(f'"{isla}": [[{lat_min}, {lon_min}], [{lat_max}, {lon_max}]],')
         print("="*60 + "\n")
         
-        # Coloreamos la matriz y la convertimos en un PNG sin márgenes
-        valid_mask = (mapa_riesgo >= 0.01) & (~np.isnan(mapa_riesgo))
-        rgba_img = cmap_riesgo(mapa_riesgo)
-        rgba_img[~valid_mask, 3] = 0.0 # Hacemos el océano y la ciudad transparentes
+        # 2. RENDERIZADO DEL PNG PURO (Transparencia perfecta)
+        valid_mask = (mapa_4326 >= 0.01) & (~np.isnan(mapa_4326)) & (mapa_4326 != 0.0)
+        rgba_img = cmap_riesgo(mapa_4326)
+        rgba_img[~valid_mask, 3] = 0.0
         
-        # Guardamos la imagen directamente de la memoria usando PIL
         img_riesgo = Image.fromarray((rgba_img * 255).astype(np.uint8), 'RGBA')
         img_riesgo.save(ruta_riesgo_png)
 
-    # Base satelital en local
-    with rasterio.open(ruta_raw) as src_raw:
-        factor = max(1, max(src_raw.height, src_raw.width) // 2000)
-        h_new, w_new = src_raw.height // factor, src_raw.width // factor
+    # 3. REPROYECCIÓN DE TEMPERATURAS Y COMPRESIÓN JSON PARA VENTANAS FLOTANTES
+    with rasterio.open(ruta_tif_temp) as src_t:
+        temp_4326 = np.zeros((height_4326, width_4326), dtype=np.float32)
+        reproject(
+            source=rasterio.band(src_t, 1),
+            destination=temp_4326,
+            src_transform=src_t.transform,
+            src_crs=src_t.crs,
+            dst_transform=transform_4326,
+            dst_crs='EPSG:4326',
+            resampling=Resampling.nearest
+        )
         
-        b_blue = src_raw.read(1, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
-        b_green = src_raw.read(2, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
-        b_red = src_raw.read(3, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
+        # Muestreo ligero para que el navegador no colapse con el JavaScript
+        factor_json = max(1, max(height_4326, width_4326) // 250) 
+        arr_r_json = mapa_4326[::factor_json, ::factor_json]
+        arr_t_json = temp_4326[::factor_json, ::factor_json]
         
-        rgb = np.dstack((b_red, b_green, b_blue))
-        rgb = np.clip(rgb / 3000.0, 0, 1) 
-        
-        img_base = Image.fromarray((rgb * 255).astype(np.uint8), 'RGB')
-        img_base.save(ruta_base_png)
+        json_r = json.dumps(np.nan_to_num(arr_r_json, nan=-1.0).round(2).tolist())
+        json_t = json.dumps(np.nan_to_num(arr_t_json, nan=-99.0).round(1).tolist())
 
+    # 4. GENERACIÓN DE LEYENDA
     fig_leg, ax_leg = plt.subplots(figsize=(8, 1), dpi=150)
     fig_leg.subplots_adjust(bottom=0.5)
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(0, 1), cmap=cmap_riesgo),
@@ -387,99 +409,79 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
     plt.savefig(ruta_leyenda, bbox_inches='tight', transparent=True)
     plt.close()
 
-    # Compresion de datos interactivos a JSON
-    with rasterio.open(ruta_tif_riesgo) as src_r, rasterio.open(ruta_tif_temp) as src_t:
-        factor_json = max(1, max(src_r.height, src_r.width) // 250) 
-        h_j, w_j = src_r.height // factor_json, src_r.width // factor_json
-        
-        arr_r = src_r.read(1, out_shape=(h_j, w_j), resampling=rasterio.enums.Resampling.nearest)
-        arr_t = src_t.read(1, out_shape=(h_j, w_j), resampling=rasterio.enums.Resampling.nearest)
-        
-        json_r = json.dumps(np.nan_to_num(arr_r, nan=-1.0).round(2).tolist())
-        json_t = json.dumps(np.nan_to_num(arr_t, nan=-99.0).round(1).tolist())
-
-    with open(ruta_base_png, "rb") as f: base64_base = base64.b64encode(f.read()).decode('utf-8')
+    # 5. CONSTRUCCIÓN DEL HTML LOCAL (Actualizado para usar Leaflet internamente)
     with open(ruta_riesgo_png, "rb") as f: base64_riesgo = base64.b64encode(f.read()).decode('utf-8')
     with open(ruta_leyenda, "rb") as f: base64_ley = base64.b64encode(f.read()).decode('utf-8')
+    ruta_html = os.path.join(dir_salida, f"visor_interactivo_{isla.replace(' ', '_')}.html")
         
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
-        <title>Visor riesgo de incendio para {isla}</title>
+        <title>Visor Web Local - {isla}</title>
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <style>
-            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; text-align: center; padding: 20px; }}
-            .container {{ display: inline-block; position: relative; margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); background: white; border-radius: 6px; overflow: hidden; max-width: 900px; cursor: crosshair; }}
-            .map-layer {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }}
-            .base-layer {{ position: relative; display: block; width: 100%; height: auto; }}
-            .controls {{ margin: 20px auto; padding: 15px; background: white; display: inline-block; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; text-align: center; margin: 0; padding: 20px; }}
+            .container {{ display: inline-block; position: relative; margin-top: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); background: white; border-radius: 6px; overflow: hidden; max-width: 900px; }}
+            #map {{ width: 900px; height: 700px; cursor: crosshair; }}
+            .controls {{ margin: 0 auto 20px auto; padding: 15px; background: white; display: inline-block; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
             input[type=range] {{ width: 300px; vertical-align: middle; margin: 0 15px; }}
-            .legend {{ margin-top: 15px; max-width: 400px; height: auto; }}
-            #tooltip {{ position: absolute; background: rgba(0,0,0,0.85); color: #fff; padding: 8px 12px; border-radius: 5px; font-size: 14px; display: none; z-index: 100; pointer-events: none; text-align: left; box-shadow: 0px 4px 6px rgba(0,0,0,0.3); }}
+            #tooltip {{ position: absolute; background: rgba(0,0,0,0.85); color: #fff; padding: 8px 12px; border-radius: 5px; font-size: 14px; display: none; z-index: 9999; pointer-events: none; text-align: left; }}
         </style>
     </head>
     <body>
         <div id="tooltip"></div>
-        <h2> Riesgo y cobertura terrestre para {isla}</h2>
+        <h2> Riesgo Operativo - {isla}</h2>
         <p style="color: #555; font-size: 15px; margin-top: -10px; margin-bottom: 20px;">
-            <strong>🛰️ Fecha Satélite:</strong> {fecha_sat} &nbsp;&nbsp;|&nbsp;&nbsp; <strong>⏱️ Día de la previsión:</strong> {fecha_calc}
+            <strong>🛰️ Fecha Satélite:</strong> {fecha_sat} &nbsp;&nbsp;|&nbsp;&nbsp; <strong>⏱️ Día de previsión:</strong> {fecha_calc}
         </p>
         
         <div class="controls">
-            <label><strong>Transparencia del mapa de riesgo:</strong></label>
-            Oculto <input type="range" id="opacitySlider" min="0" max="100" value="75"> Visible
-            <br>
-            <img src="data:image/png;base64,{base64_ley}" class="legend" alt="Leyenda de Riesgo">
-        </div>
-        <br>
+            <label><strong>Transparencia:</strong></label>
+            Oculto <input type="range" id="opacitySlider" min="0" max="100" value="75"> Visible<br>
+            <img src="data:image/png;base64,{base64_ley}" alt="Leyenda" style="margin-top:15px; max-width: 400px;">
+        </div><br>
         
-        <div class="container" id="mapContainer">
-            <img src="data:image/png;base64,{base64_base}" class="base-layer">
-            <img src="data:image/png;base64,{base64_riesgo}" class="map-layer" id="riskLayer" style="opacity: 0.75;">
-        </div>
+        <div class="container"><div id="map"></div></div>
         
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
-            const slider = document.getElementById('opacitySlider');
-            const riskLayer = document.getElementById('riskLayer');
-            const container = document.getElementById('mapContainer');
-            const tooltip = document.getElementById('tooltip');
+            var map = L.map('map').setView([{(lat_min+lat_max)/2}, {(lon_min+lon_max)/2}], 10);
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{ maxZoom: 15 }}).addTo(map);
             
+            var bounds = [[{lat_min}, {lon_min}], [{lat_max}, {lon_max}]];
+            var riskLayer = L.imageOverlay('data:image/png;base64,{base64_riesgo}', bounds, {{opacity: 0.75}}).addTo(map);
+            
+            document.getElementById('opacitySlider').addEventListener('input', function() {{
+                riskLayer.setOpacity(this.value / 100);
+            }});
+
             const riskData = {json_r};
             const tempData = {json_t};
-            const gridH = {h_j};
-            const gridW = {w_j};
+            const gridH = {int(height_4326 // factor_json)};
+            const gridW = {int(width_4326 // factor_json)};
+            const tooltip = document.getElementById('tooltip');
 
-            slider.addEventListener('input', function() {{
-                riskLayer.style.opacity = this.value / 100;
-            }});
-            
-            container.addEventListener('mousemove', function(e) {{
-                const rect = container.getBoundingClientRect();
+            document.getElementById('map').addEventListener('mousemove', function(e) {{
+                const rect = this.getBoundingClientRect();
                 let relX = (e.clientX - rect.left) / rect.width;
                 let relY = (e.clientY - rect.top) / rect.height;
-                
                 let gridY = Math.floor(relY * gridH);
                 let gridX = Math.floor(relX * gridW);
                 
                 if (gridY >= 0 && gridY < gridH && gridX >= 0 && gridX < gridW) {{
                     let r = riskData[gridY][gridX];
                     let t = tempData[gridY][gridX];
-                    
                     if (r >= 0) {{
                         tooltip.style.display = 'block';
                         tooltip.style.left = (e.pageX + 15) + 'px';
                         tooltip.style.top = (e.pageY + 15) + 'px';
                         tooltip.innerHTML = `<strong>Riesgo:</strong> ${{(r * 100).toFixed(1)}}%<br><strong>Temperatura:</strong> ${{t.toFixed(1)}} °C`;
-                    }} else {{
-                        tooltip.style.display = 'none';
-                    }}
+                    }} else {{ tooltip.style.display = 'none'; }}
                 }}
             }});
-            
-            container.addEventListener('mouseleave', function() {{
-                tooltip.style.display = 'none';
-            }});
+            document.getElementById('map').addEventListener('mouseleave', () => tooltip.style.display = 'none');
         </script>
     </body>
     </html>
@@ -487,7 +489,7 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
     with open(ruta_html, 'w', encoding='utf-8') as f:
         f.write(html_content)
         
-    print(f"-> Archivos base web generados con éxito en: {dir_salida}")
+    print(f"-> Base web generada. Archivo local sincronizado con tecnología Leaflet en: {ruta_html}")
 
 if __name__ == "__main__":
     try:
