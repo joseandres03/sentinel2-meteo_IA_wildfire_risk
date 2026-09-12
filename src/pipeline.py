@@ -341,7 +341,8 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
     ruta_base_png = os.path.join(dir_salida, f"base_rgb_{isla.replace(' ', '_')}.png")
     ruta_riesgo_png = os.path.join(dir_salida, f"capa_riesgo_{isla.replace(' ', '_')}.png")
     ruta_datos_js = os.path.join(dir_salida, f"datos_{isla.replace(' ', '_')}.js")
-    ruta_leyenda = os.path.join(dir_salida, "leyenda.png") # Leyenda global
+    ruta_leyenda = os.path.join(dir_salida, "leyenda.png")
+    ruta_html = os.path.join(dir_salida, f"visor_interactivo_{isla.replace(' ', '_')}.html") # ¡Restaurada!
     
     cmap_riesgo = obtener_cmap_personalizado()
     
@@ -383,7 +384,8 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
         rgba_img[~valid_mask, 3] = 0.0 
         rgba_img[mascara_nubes] = [1.0, 1.0, 1.0, 0.65] 
         
-        img_riesgo = Image.fromarray((rgba_img * 255).astype(np.uint8), 'RGBA')
+        # Guardamos sin el parámetro de modo para evitar el DeprecationWarning
+        img_riesgo = Image.fromarray((rgba_img * 255).astype(np.uint8))
         img_riesgo.save(ruta_riesgo_png)
 
     # PROYECCIÓN Y COMPRESIÓN DE DATOS PARA EL CURSOR DE LA WEB
@@ -403,7 +405,6 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
         arr_r_json = mapa_4326[::factor_json, ::factor_json]
         arr_t_json = temp_4326[::factor_json, ::factor_json]
         
-        # Exportamos forzando la variable al objeto global 'window' para que JS lo lea sin fallos
         with open(ruta_datos_js, 'w', encoding='utf-8') as f:
             f.write(f"window.datos_{isla.replace(' ', '_')} = {{\n")
             f.write(f"  riesgo: {json.dumps(np.nan_to_num(arr_r_json, nan=-1.0).round(2).tolist())},\n")
@@ -412,21 +413,21 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
             f.write(f"  gridW: {int(width_4326 // factor_json)}\n")
             f.write("};\n")
 
-    # DISEÑO DE LEYENDA (CON INDICADOR DE NUBES)
+    # DISEÑO DE LEYENDA
     fig_leg, ax_leg = plt.subplots(figsize=(8, 1.5), dpi=150)
     fig_leg.subplots_adjust(bottom=0.4, top=0.7)
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(0, 1), cmap=cmap_riesgo),
                       cax=ax_leg, orientation='horizontal')
     cb.set_label('Probabilidad de Riesgo (0.0 a 1.0)', fontsize=12, fontweight='bold')
     
-    # Añadimos el recuadro blanco para la información sobre las nubes
+    import matplotlib.patches as mpatches
     nube_patch = mpatches.Patch(color='#FFFFFF', ec='#888888', label='Nubes (Área sin datos)')
     fig_leg.legend(handles=[nube_patch], loc='upper center', bbox_to_anchor=(0.5, 1.4), frameon=False, fontsize=11)
     
     plt.savefig(ruta_leyenda, bbox_inches='tight', transparent=True)
     plt.close()
 
-    # (El resto del código se mantiene igual para la generación del HTML local)
+    # GENERACIÓN DE BASE SATELITAL LOCAL
     with rasterio.open(ruta_raw) as src_raw:
         factor = max(1, max(src_raw.height, src_raw.width) // 2000)
         h_new, w_new = src_raw.height // factor, src_raw.width // factor
@@ -434,8 +435,9 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
         b_green = src_raw.read(2, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
         b_red = src_raw.read(3, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
         rgb = np.clip(np.dstack((b_red, b_green, b_blue)) / 3000.0, 0, 1) 
-        Image.fromarray((rgb * 255).astype(np.uint8), 'RGB').save(ruta_base_png)
+        Image.fromarray((rgb * 255).astype(np.uint8)).save(ruta_base_png)
 
+    # CONSTRUCCIÓN DEL HTML LOCAL
     with open(ruta_riesgo_png, "rb") as f: base64_riesgo = base64.b64encode(f.read()).decode('utf-8')
     with open(ruta_leyenda, "rb") as f: base64_ley = base64.b64encode(f.read()).decode('utf-8')
         
