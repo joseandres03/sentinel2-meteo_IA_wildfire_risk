@@ -364,6 +364,11 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
         transformador = pyproj.Transformer.from_crs(src_raw.crs, "EPSG:4326", always_xy=True)
         lon_min, lat_min = transformador.transform(limites.left, limites.bottom)
         lon_max, lat_max = transformador.transform(limites.right, limites.top)
+
+        print("\n" + "="*50)
+        print(f"🌍 COORDENADAS PARA LA WEB (app.js) - {isla}:")
+        print(f'"{isla}": [[{lat_min}, {lon_min}], [{lat_max}, {lon_max}]],')
+        print("="*50 + "\n")
         
         # Base de satélite
         fig, ax = plt.subplots(figsize=(10 * aspect_ratio, 10), dpi=200)
