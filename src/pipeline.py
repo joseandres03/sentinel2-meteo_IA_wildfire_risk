@@ -233,17 +233,20 @@ def extraer_parches_solapados(imagen_bruta, mascara_vegetacion, perfil, tamano=6
 
 def predecir_riesgo(tensores_satelite, meteo_matriz):
     print("\nCalculando la probabilidad de riesgo mediante el modelo...")
-    
-    class SafeDense(keras.layers.Dense):
-        def __init__(self, *args, **kwargs):
-            kwargs.pop('quantization_config', None)
-            super().__init__(*args, **kwargs)
-            
-    modelo = keras.models.load_model(RUTA_MODELO, custom_objects={'Dense': SafeDense})
+
+    # Parche global para limpiar quantization_config en la carga de capas Dense
+    original_from_config = keras.layers.Dense.from_config
+    @classmethod
+    def patched_from_config(cls, config):
+        config.pop('quantization_config', None)
+        return original_from_config(config)
+    keras.layers.Dense.from_config = patched_from_config
+
+    modelo = keras.models.load_model(RUTA_MODELO)
     escalador = joblib.load(RUTA_ESCALADOR)
-    
+
     meteo_escalada = escalador.transform(meteo_matriz)
-    
+
     return modelo.predict([tensores_satelite, meteo_escalada], batch_size=32)
 
 def reconstruir_mapa_calor(predicciones, coordenadas, dimensiones_base, m_tierra, m_vegetacion, perfil, ruta_salida, tamano=64):
