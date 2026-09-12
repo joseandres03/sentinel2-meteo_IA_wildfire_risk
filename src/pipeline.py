@@ -9,6 +9,7 @@ import rasterio
 import rasterio.enums
 import requests
 import pyproj
+from PIL import Image
 import osmnx as ox
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -330,7 +331,7 @@ def exportar_dashboard_png(ruta_tif, isla, ruta_png):
         plt.close()
 
 def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, dir_salida, fecha_sat):
-    print(f"\nConstruyendo visor web interactivo para {isla}...")
+    print(f"\nConstruyendo visor web interactivo y exportando capas puras para {isla}...")
     
     fecha_calc = datetime.now().strftime("%Y-%m-%d %H:%M")
     
@@ -339,13 +340,34 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
     ruta_leyenda = os.path.join(dir_salida, f"leyenda_{isla.replace(' ', '_')}.png")
     ruta_html = os.path.join(dir_salida, f"visor_interactivo_{isla.replace(' ', '_')}.html")
     
-    frontera = ox.geocode_to_gdf(f"{isla}, Canarias, España")
     cmap_riesgo = obtener_cmap_personalizado()
     
+    with rasterio.open(ruta_tif_riesgo) as src_riesgo:
+        mapa_riesgo = src_riesgo.read(1)
+        
+        # Obtenemos las coordenadas GPS perimetrales exactas para Leaflet
+        transformador = pyproj.Transformer.from_crs(src_riesgo.crs, "EPSG:4326", always_xy=True)
+        lon_min, lat_min = transformador.transform(src_riesgo.bounds.left, src_riesgo.bounds.bottom)
+        lon_max, lat_max = transformador.transform(src_riesgo.bounds.right, src_riesgo.bounds.top)
+        
+        print("\n" + "="*60)
+        print(f"🌍 COORDENADAS EXACTAS PARA LA WEB (app.js) - {isla}:")
+        print(f'"{isla}": [[{lat_min}, {lon_min}], [{lat_max}, {lon_max}]],')
+        print("="*60 + "\n")
+        
+        # Coloreamos la matriz y la convertimos en un PNG sin márgenes
+        valid_mask = (mapa_riesgo >= 0.01) & (~np.isnan(mapa_riesgo))
+        rgba_img = cmap_riesgo(mapa_riesgo)
+        rgba_img[~valid_mask, 3] = 0.0 # Hacemos el océano y la ciudad transparentes
+        
+        # Guardamos la imagen directamente de la memoria usando PIL
+        img_riesgo = Image.fromarray((rgba_img * 255).astype(np.uint8), 'RGBA')
+        img_riesgo.save(ruta_riesgo_png)
+
+    # Base satelital en local
     with rasterio.open(ruta_raw) as src_raw:
-        h_orig, w_orig = src_raw.height, src_raw.width
-        factor = max(1, max(h_orig, w_orig) // 2000)
-        h_new, w_new = h_orig // factor, w_orig // factor
+        factor = max(1, max(src_raw.height, src_raw.width) // 2000)
+        h_new, w_new = src_raw.height // factor, src_raw.width // factor
         
         b_blue = src_raw.read(1, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
         b_green = src_raw.read(2, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
@@ -354,62 +376,21 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
         rgb = np.dstack((b_red, b_green, b_blue))
         rgb = np.clip(rgb / 3000.0, 0, 1) 
         
-        limites = src_raw.bounds
-        extension_utm = [limites.left, limites.right, limites.bottom, limites.top]
-        frontera_utm = frontera.to_crs(src_raw.crs)
+        img_base = Image.fromarray((rgb * 255).astype(np.uint8), 'RGB')
+        img_base.save(ruta_base_png)
 
-        # Cálculo de proporción y extracción de coordenadas web
-        aspect_ratio = (limites.right - limites.left) / (limites.top - limites.bottom)
-        
-        transformador = pyproj.Transformer.from_crs(src_raw.crs, "EPSG:4326", always_xy=True)
-        lon_min, lat_min = transformador.transform(limites.left, limites.bottom)
-        lon_max, lat_max = transformador.transform(limites.right, limites.top)
-
-        print("\n" + "="*50)
-        print(f"🌍 COORDENADAS PARA LA WEB (app.js) - {isla}:")
-        print(f'"{isla}": [[{lat_min}, {lon_min}], [{lat_max}, {lon_max}]],')
-        print("="*50 + "\n")
-        
-        # Base de satélite
-        fig, ax = plt.subplots(figsize=(10 * aspect_ratio, 10), dpi=200)
-        ax.set_position([0, 0, 1, 1])
-        ax.set_facecolor('white')
-        ax.imshow(rgb, extent=extension_utm)
-        frontera_utm.boundary.plot(ax=ax, color='black', linewidth=1.5)
-        ax.set_xlim(limites.left, limites.right)
-        ax.set_ylim(limites.bottom, limites.top)
-        ax.axis('off')
-        plt.savefig(ruta_base_png, dpi=200, facecolor='white')
-        plt.close()
-        
-    with rasterio.open(ruta_tif_riesgo) as src_riesgo:
-        mapa_riesgo = src_riesgo.read(1, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.nearest)
-        
-        # Capa de riesgo
-        fig, ax = plt.subplots(figsize=(10 * aspect_ratio, 10), dpi=200)
-        ax.set_position([0, 0, 1, 1])
-        fig.patch.set_alpha(0.0)
-        ax.patch.set_alpha(0.0)
-        ax.imshow(mapa_riesgo, cmap=cmap_riesgo, vmin=0.01, vmax=1.0, extent=extension_utm)
-        ax.set_xlim(limites.left, limites.right)
-        ax.set_ylim(limites.bottom, limites.top)
-        ax.axis('off')
-        plt.savefig(ruta_riesgo_png, dpi=200, transparent=True)
-        plt.close()
-
-    # leyenda
     fig_leg, ax_leg = plt.subplots(figsize=(8, 1), dpi=150)
     fig_leg.subplots_adjust(bottom=0.5)
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(0, 1), cmap=cmap_riesgo),
                       cax=ax_leg, orientation='horizontal')
-    cb.set_label('Riesgo de incendio (0.0 a 1.0)', fontsize=12, fontweight='bold')
+    cb.set_label('Probabilidad de Riesgo (0.0 a 1.0)', fontsize=12, fontweight='bold')
     plt.savefig(ruta_leyenda, bbox_inches='tight', transparent=True)
     plt.close()
 
-    # Datos (JSON) para las ventanas flotantes interactivas
+    # Compresion de datos interactivos a JSON
     with rasterio.open(ruta_tif_riesgo) as src_r, rasterio.open(ruta_tif_temp) as src_t:
-        factor_json = max(1, max(h_orig, w_orig) // 250) 
-        h_j, w_j = h_orig // factor_json, w_orig // factor_json
+        factor_json = max(1, max(src_r.height, src_r.width) // 250) 
+        h_j, w_j = src_r.height // factor_json, src_r.width // factor_json
         
         arr_r = src_r.read(1, out_shape=(h_j, w_j), resampling=rasterio.enums.Resampling.nearest)
         arr_t = src_t.read(1, out_shape=(h_j, w_j), resampling=rasterio.enums.Resampling.nearest)
@@ -417,7 +398,6 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
         json_r = json.dumps(np.nan_to_num(arr_r, nan=-1.0).round(2).tolist())
         json_t = json.dumps(np.nan_to_num(arr_t, nan=-99.0).round(1).tolist())
 
-    # Base64
     with open(ruta_base_png, "rb") as f: base64_base = base64.b64encode(f.read()).decode('utf-8')
     with open(ruta_riesgo_png, "rb") as f: base64_riesgo = base64.b64encode(f.read()).decode('utf-8')
     with open(ruta_leyenda, "rb") as f: base64_ley = base64.b64encode(f.read()).decode('utf-8')
@@ -507,7 +487,7 @@ def exportar_visor_interactivo(ruta_tif_riesgo, ruta_tif_temp, ruta_raw, isla, d
     with open(ruta_html, 'w', encoding='utf-8') as f:
         f.write(html_content)
         
-    print(f"-> Visor web interactivo generado con éxito en: {ruta_html}")
+    print(f"-> Archivos base web generados con éxito en: {dir_salida}")
 
 if __name__ == "__main__":
     try:
