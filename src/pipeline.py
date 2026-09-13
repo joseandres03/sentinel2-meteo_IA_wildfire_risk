@@ -59,7 +59,14 @@ def seleccionar_isla():
 
 def descargar_satelite(isla, proyecto_gcp="tfm-bbdd-499813"):
     """
-    Descarga la última imagen Sentinel-2 de forma síncrona y segura para evitar bloqueos en CI/CD.
+    Descarga la última imagen Sentinel-2 forzando la proyección UTM de Canarias.
+    
+    Args:
+        isla (str): Nombre de la isla a procesar.
+        proyecto_gcp (str): ID del proyecto en Google Cloud para autenticar Earth Engine.
+        
+    Returns:
+        str: Ruta local donde se ha guardado el GeoTIFF crudo.
     """
     print(f"\nBuscando la última imagen de la constelación Sentinel-2 para {isla}...")
     ee.Initialize(project=proyecto_gcp)
@@ -84,24 +91,15 @@ def descargar_satelite(isla, proyecto_gcp="tfm-bbdd-499813"):
     ruta_salida = os.path.join(BASE_DIR, 'data', 'raw', f'satelite_{isla.replace(" ", "_")}.tif')
     os.makedirs(os.path.dirname(ruta_salida), exist_ok=True)
     
-    print("-> Descargando GeoTIFF mediante enlace directo seguro...")
-    url_descarga = imagen_export.getDownloadURL({
-        'scale': 10,
-        'crs': 'EPSG:32628',
-        'region': region.getInfo()['coordinates'],
-        'format': 'GEO_TIFF'
-    })
+    print("-> Descargando GeoTIFF...")
+    geemap.download_ee_image(
+        image=imagen_export,
+        filename=ruta_salida,
+        region=region,
+        scale=10,
+        crs='EPSG:32628'
+    )
     
-    respuesta = requests.get(url_descarga, stream=True)
-    if respuesta.status_code != 200:
-        raise RuntimeError(f"Error al descargar la imagen de Google Earth Engine: {respuesta.text}")
-        
-    with open(ruta_salida, 'wb') as f:
-        for chunk in respuesta.iter_content(chunk_size=1024*1024):
-            if chunk:
-                f.write(chunk)
-                
-    print(f"-> Descarga completada correctamente para {isla}.")
     return ruta_salida, fecha_captura
 
 def descargar_meteo_malla(isla, coords_utm):
@@ -173,15 +171,20 @@ def descargar_meteo_malla(isla, coords_utm):
 # MOTOR DE INFERENCIA Y CARTOGRAFÍA
 
 def calcular_mascaras_fisicas(ruta):
+    """
+    Calcula índices espectrales para separar la silueta insular de las zonas forestales.
+    
+    Args:
+        ruta (str): Ruta local del GeoTIFF satelital.
+        
+    Returns:
+        tuple: (Matriz bruta 3D, Máscara binaria de tierra, Máscara binaria de vegetación, Perfil geoespacial)
+    """
     print(f"\nProcesando reflectancia y delimitando el litoral...")
     with rasterio.open(ruta) as src:
-        # Leemos las bandas y cerramos el puntero del archivo de inmediato
-        raster_data = src.read()
+        imagen_bruta = np.transpose(src.read(), (1, 2, 0)).astype(np.float32)
         perfil_geo = src.profile
         
-    imagen_bruta = np.transpose(raster_data, (1, 2, 0)).astype(np.float32)
-    del raster_data # Liberamos el buffer inicial
-    
     b3_green = imagen_bruta[:, :, 1]
     b4_red   = imagen_bruta[:, :, 2]
     b8_nir   = imagen_bruta[:, :, 3]
@@ -192,13 +195,23 @@ def calcular_mascaras_fisicas(ruta):
     ndvi = (b8_nir - b4_red) / (b8_nir + b4_red + 1e-8)
     mascara_vegetacion = ndvi > 0.1
     
-    # Limpiamos bandas individuales sobrantes
-    del b3_green, b4_red, b8_nir, ndwi, ndvi
-    gc.collect()
-    
     return imagen_bruta, mascara_tierra, mascara_vegetacion, perfil_geo
 
-def extraer_parches_solapados(imagen_bruta, mascara_vegetacion, perfil, tamano=64, solape=8):
+def extraer_parches_solapados(imagen_bruta, mascara_vegetacion, perfil, tamano=64, solape=4):
+    """
+    Ejecuta una ventana deslizante con superposición sobre la matriz satelital, 
+    calculando la coordenada espacial UTM exacta del centro de cada tensor.
+    
+    Args:
+        imagen_bruta (np.array): Matriz 3D con la imagen satelital completa.
+        mascara_vegetacion (np.array): Matriz 2D binaria (True = hay vegetación).
+        perfil (dict): Metadatos espaciales devueltos por Rasterio.
+        tamano (int): Tamaño del parche (64x64 por defecto).
+        solape (int): Píxeles de superposición entre un parche y el siguiente.
+        
+    Returns:
+        tuple: (Array de tensores, Lista de coordenadas (fila, col), Lista UTM (x, y), Dimensiones base)
+    """
     print(f"\nGenerando los parches a partir de la imagen ({tamano}x{tamano} con solape de {solape}px)...")
     filas_totales, cols_totales, _ = imagen_bruta.shape
     paso = tamano - solape
@@ -211,15 +224,12 @@ def extraer_parches_solapados(imagen_bruta, mascara_vegetacion, perfil, tamano=6
                 parches.append(imagen_bruta[f:f+tamano, c:c+tamano, :])
                 coordenadas.append((f, c))
                 
+                # Calculamos el centro del parche georreferenciado
                 centro_f = f + (tamano / 2.0)
                 centro_c = c + (tamano / 2.0)
                 utm_x, utm_y = rasterio.transform.xy(transform, centro_f, centro_c)
                 coords_utm.append((utm_x, utm_y))
                 
-    # Borramos la imagen bruta de la RAM antes de devolver los arrays
-    del imagen_bruta, mascara_vegetacion
-    gc.collect()
-    
     return np.array(parches), coordenadas, coords_utm, (filas_totales, cols_totales)
 
 def predecir_riesgo(tensores_satelite, meteo_matriz):
@@ -544,9 +554,9 @@ if __name__ == "__main__":
                 bounds_isla = exportar_visor_interactivo(ruta_export_tif, ruta_export_temp, ruta_raw, isla, dir_docs, fecha_satelite)
                 config_docs["bounds"][isla] = bounds_isla
                 
-                print(f"\n {isla} completada con éxito. Riesgo máximo: {np.max(riesgos)*100:.1f}%")
+                print(f"\n✅ {isla} completada con éxito. Riesgo máximo: {np.max(riesgos)*100:.1f}%")
             else:
-                print(f"\n Operación abortada: No se detectó cobertura vegetal en {isla}.")
+                print(f"\n⚠️ Operación abortada: No se detectó cobertura vegetal en {isla}.")
                 
         except Exception as e:
             print(f"\n[ERROR CRÍTICO] Fallo al procesar {isla}: {e}")
