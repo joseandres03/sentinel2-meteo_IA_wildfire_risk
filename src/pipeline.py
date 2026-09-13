@@ -5,6 +5,7 @@ import ee
 import gc
 import numpy as np
 import joblib
+import time
 import geemap
 import rasterio
 import rasterio.enums
@@ -114,6 +115,7 @@ def descargar_meteo_malla(isla, coords_utm):
     Returns:
         np.array: Matriz de dimensiones (N_parches, 3) con [Temp, HR, Viento] para cada cuadrante.
     """
+    import time
     print(f"\n Descargando datos meteorológicos del HARMONIE-AROME e interpolando por la geografía...")
     bbox = BBOX_CANARIAS[isla]
     
@@ -132,17 +134,32 @@ def descargar_meteo_malla(isla, coords_utm):
         "forecast_days": 1
     }
     
-    # Petición masiva a la API
-    respuesta = requests.get(url, params=parametros).json()
+    # Bucle de seguridad para reintentar si Open-Meteo sufre una interrupcion
+    max_reintentos = 3
+    for intento in range(max_reintentos):
+        try:
+            # Petición masiva a la API con límite de espera de 15 segundos
+            respuesta_raw = requests.get(url, params=parametros, timeout=15)
+            respuesta_raw.raise_for_status() 
+            respuesta = respuesta_raw.json()
+            
+            # Barrera de seguridad para cazar errores de la API
+            if isinstance(respuesta, dict) and respuesta.get("error"):
+                raise RuntimeError(f"La API de Open-Meteo rechazó la conexión: {respuesta.get('reason')}")
+                
+            break # Si la descarga es exitosa, rompemos el bucle y continuamos
+            
+        except requests.exceptions.RequestException as e:
+            if intento < max_reintentos - 1:
+                print(f"⚠️ Aviso: Micro-corte en Open-Meteo. Reintentando en 5 segundos... (Intento {intento+1}/{max_reintentos})")
+                time.sleep(5)
+            else:
+                raise RuntimeError(f"Fallo definitivo de Open-Meteo tras {max_reintentos} intentos: {e}")
     
-    # Barrera de seguridad para cazar errores de la API en lugar de romper el código
-    if isinstance(respuesta, dict) and respuesta.get("error"):
-        raise RuntimeError(f"La API de Open-Meteo rechazó la conexión: {respuesta.get('reason')}")
-    
-    # El índice 13 corresponde a las 13:00h del día
-    t_malla = [loc['hourly']['temperature_2m'][13] for loc in respuesta]
-    hr_malla = [loc['hourly']['relative_humidity_2m'][13] for loc in respuesta]
-    v_malla = [loc['hourly']['wind_speed_10m'][13] for loc in respuesta]
+
+    t_malla = [loc['hourly']['temperature_2m'][12] for loc in respuesta]
+    hr_malla = [loc['hourly']['relative_humidity_2m'][12] for loc in respuesta]
+    v_malla = [loc['hourly']['wind_speed_10m'][12] for loc in respuesta]
     puntos_origen = np.column_stack((malla_lons.flatten(), malla_lats.flatten()))
     
     # Convertimos los centroides UTM de los parches a Lat/Lon para la interpolación
@@ -153,7 +170,7 @@ def descargar_meteo_malla(isla, coords_utm):
     )
     puntos_destino = np.column_stack((lons_parches, lats_parches))
     
-    # Interpolamos los datos meteorológicos (cruce espacial)
+    # Interpolamos los datos meteorológicos
     t_interp = griddata(puntos_origen, t_malla, puntos_destino, method='linear')
     hr_interp = griddata(puntos_origen, hr_malla, puntos_destino, method='linear')
     v_interp = griddata(puntos_origen, v_malla, puntos_destino, method='linear')
