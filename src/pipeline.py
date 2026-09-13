@@ -3,6 +3,7 @@ import gc
 import json
 import time
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import requests
 import numpy as np
@@ -485,11 +486,10 @@ if __name__ == "__main__":
     os.makedirs(dir_docs, exist_ok=True)
     
     config_docs = {
-        "bounds": {},
-        "fecha_actualizacion": datetime.now().strftime("%Y-%m-%d %H:%M")
+        "bounds": {}
     }
     
-    # escaneo secuencial y destructivo (en memoria) isla por isla
+    # escaneo secuencial isla por isla
     for isla in BBOX_CANARIAS.keys():
         try:
             print(f"\n{'='*50}\n🛰️ PROCESANDO: {isla}\n{'='*50}")
@@ -520,8 +520,6 @@ if __name__ == "__main__":
             print(f"\n[ERROR CRÍTICO] caída del pipeline durante el procesado de {isla}: {e}")
             
         finally:
-            # recolección de basura estricta para garantizar la supervivencia del servidor CI/CD
-            print(f" liberando buffers y limpiando gráficos en RAM para {isla}...")
             if 'img_bruta' in locals(): del img_bruta
             if 'tensores' in locals(): del tensores
             if 'riesgos' in locals(): del riesgos
@@ -531,7 +529,8 @@ if __name__ == "__main__":
             gc.collect()
             keras.backend.clear_session()
             
-    # inyección de los linderos perimetrales al motor web
+    config_docs["fecha_actualizacion"] = datetime.now(ZoneInfo("Atlantic/Canary")).strftime("%Y-%m-%d %H:%M")
+            
     ruta_config = os.path.join(dir_docs, 'config.js')
     with open(ruta_config, 'w', encoding='utf-8') as f:
         f.write(f"const configWeb = {json.dumps(config_docs, indent=4)};\n")
