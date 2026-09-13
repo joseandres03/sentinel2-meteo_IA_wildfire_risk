@@ -13,6 +13,7 @@ from PIL import Image
 from scipy.interpolate import griddata
 
 import ee
+import geemap
 import pyproj
 import osmnx as ox
 import geopandas as gpd
@@ -62,8 +63,8 @@ def seleccionar_isla() -> str:
 
 def descargar_satelite(isla: str, proyecto_gcp: str = "tfm-bbdd-499813") -> tuple:
     """
-    Descargo la última imagen Sentinel-2 mediante petición HTTP directa en streaming 
-    para evitar bloqueos por interbloqueo de hilos (deadlocks) en GitHub Actions.
+    Descarga la última imagen Sentinel-2 utilizando geemap para trocear internamente
+    la petición y evadir el límite estricto de 48MB de la API de Earth Engine.
 
     Parameters
     ----------
@@ -77,7 +78,8 @@ def descargar_satelite(isla: str, proyecto_gcp: str = "tfm-bbdd-499813") -> tupl
     tuple
         (ruta_salida, fecha_captura) con la ubicación local del archivo GeoTIFF y su fecha.
     """
-    print(f"\nbuscando la última imagen de la constelación Sentinel-2 para {isla}...")
+    
+    print(f"\nBuscando la última imagen de la constelación Sentinel-2 para {isla}...")
     ee.Initialize(project=proyecto_gcp)
     
     region = ee.Geometry.Rectangle(BBOX_CANARIAS[isla])
@@ -100,22 +102,15 @@ def descargar_satelite(isla: str, proyecto_gcp: str = "tfm-bbdd-499813") -> tupl
     ruta_salida = os.path.join(BASE_DIR, 'data', 'raw', f'satelite_{isla.replace(" ", "_")}.tif')
     os.makedirs(os.path.dirname(ruta_salida), exist_ok=True)
     
-    print("-> descargando GeoTIFF mediante enlace directo seguro...")
-    url_descarga = imagen_export.getDownloadURL({
-        'scale': 10,
-        'crs': 'EPSG:32628',
-        'region': region.getInfo()['coordinates'],
-        'format': 'GEO_TIFF'
-    })
+    print("-> descargando GeoTIFF...")
+    geemap.download_ee_image(
+        image=imagen_export,
+        filename=ruta_salida,
+        region=region,
+        scale=10,
+        crs='EPSG:32628'
+    )
     
-    respuesta = requests.get(url_descarga, stream=True)
-    respuesta.raise_for_status()
-    
-    with open(ruta_salida, 'wb') as f:
-        for chunk in respuesta.iter_content(chunk_size=1024*1024):
-            if chunk:
-                f.write(chunk)
-                
     return ruta_salida, fecha_captura
 
 def descargar_meteo_malla(isla: str, coords_utm: list) -> np.ndarray:
