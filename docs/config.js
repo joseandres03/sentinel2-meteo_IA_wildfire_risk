@@ -41,5 +41,5 @@ const configWeb = {
             ]
         ]
     },
-    "fecha_actualizacion": "2026-09-13 00:08"
+    "fecha_actualizacion": "2026-09-13 03:21"
 };
