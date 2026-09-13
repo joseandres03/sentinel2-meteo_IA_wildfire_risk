@@ -16,7 +16,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          # He eliminado la línea cache: 'pip' para forzar una instalación limpia
+              # He eliminado la línea cache: 'pip' para forzar una instalación limpia
 
       - name: Instalar Dependencias del Sistema
         run: |
@@ -36,20 +36,8 @@ jobs:
           mkdir -p ~/.config/earthengine
           echo "$GEE_CREDENTIALS" > ~/.config/earthengine/credentials
 
-      - name: Ejecutar Pipeline con Monitor de RAM
-        run: |
-          # Lanzar un monitor de memoria que imprime el consumo cada 5 segundos en background
-          while true; do
-            free -m | grep Mem | awk '{print "🔴 [MONITOR RAM] Usados: " $3 " MB de " $2 " MB (" int($3*100/$2) "%)"}'
-            sleep 5
-          done &
-          MONITOR_PID=$!
-
-          # Ejecutar el script principal
-          python src/pipeline.py
-
-          # Detener el monitor al finalizar
-          kill $MONITOR_PID
+      - name: Ejecutar Pipeline Predictivo
+        run: python src/pipeline.py
 
       - name: Subir cambios automáticamente a la Web
         env:
