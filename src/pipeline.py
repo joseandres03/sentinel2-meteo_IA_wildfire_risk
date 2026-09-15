@@ -228,17 +228,16 @@ def reconstruir_mapa_calor(predicciones: np.ndarray, coordenadas: list, dimensio
         dest.write(mapa_final, 1)
 
 def obtener_cmap_personalizado() -> LinearSegmentedColormap:
-    # Escala estandarizada AEMET para incendios (Azul -> Rojo)
+    """Mapeo de colores estandarizado AEMET en bloques sólidos (escalonado)."""
     nodos = [
-        (0.00, '#3182bd'), # Muy bajo (Azul oscuro)
-        (0.10, '#9ecae1'), # Bajo (Azul claro)
-        (0.20, '#a1d99b'), # Moderado (Verde)
-        (0.40, '#ffeda0'), # Alto (Amarillo)
-        (0.50, '#feb24c'), # Muy Alto (Naranja)
-        (0.60, '#f03b20'), # Extremo (Rojo)
-        (1.00, '#800026')  # Más allá del 60% se oscurece
+        (0.00, '#3182bd'), (0.0999, '#3182bd'), # 0 a 10% (Muy bajo - Azul oscuro)
+        (0.10, '#9ecae1'), (0.1999, '#9ecae1'), # 10 a 20% (Bajo - Azul claro)
+        (0.20, '#a1d99b'), (0.3999, '#a1d99b'), # 20 a 40% (Moderado - Verde)
+        (0.40, '#ffeda0'), (0.4999, '#ffeda0'), # 40 a 50% (Alto - Amarillo)
+        (0.50, '#feb24c'), (0.5999, '#feb24c'), # 50 a 60% (Muy Alto - Naranja)
+        (0.60, '#f03b20'), (1.00, '#f03b20')    # > 60% (Extremo - Rojo)
     ]
-    cmap = LinearSegmentedColormap.from_list("RiesgoAEMET", nodos)
+    cmap = LinearSegmentedColormap.from_list("RiesgoAEMET_Escalonado", nodos)
     cmap.set_under('black', alpha=0.0) 
     cmap.set_bad('black', alpha=0.0)
     return cmap
