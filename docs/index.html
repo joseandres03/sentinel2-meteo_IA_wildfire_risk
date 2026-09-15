@@ -5,15 +5,48 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Prevención de Incendios Forestales</title>
     
-    <!-- Librería Leaflet para Mapas -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
-    <!-- Nuestro estilo personalizado (CON TRUCO ANTI-CACHÉ ?v=2) -->
-    <link rel="stylesheet" href="style.css?v=2" />
+    <!-- ESTILOS INTEGRADOS (Evita 100% los problemas de caché de GitHub Pages) -->
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', Roboto, sans-serif; background-color: #1a1a1a; }
+        
+        #map { width: 100%; height: 100vh; z-index: 1; }
+        
+        #control-panel { 
+            position: absolute; top: 20px; left: 20px; width: 320px; 
+            background: rgba(255,255,255,0.95); padding: 20px; border-radius: 12px; 
+            box-shadow: 0 8px 16px rgba(0,0,0,0.3); z-index: 1000; 
+        }
+        
+        h2 { margin: 0 0 5px 0; color: #b30000; font-size: 1.5em; }
+        .subtitle { margin: 0 0 20px 0; color: #555; font-size: 0.9em; }
+        
+        select, input[type=range] { width: 100%; padding: 8px; margin-top: 5px; border-radius: 6px; border: 1px solid #ccc; font-size: 1em; }
+        
+        #legend-container { margin-top: 20px; padding-top: 15px; border-top: 1px solid #ddd; }
+        .info-box { margin-top: 20px; background: #f4f4f4; padding: 10px; border-radius: 8px; font-size: 0.9em; border-left: 4px solid #b30000; }
+        
+        .leyenda-aemet { display: flex; flex-direction: column; margin-top: 10px; }
+        .leyenda-fila { display: flex; align-items: center; margin-bottom: 6px; font-size: 0.9em; color: #333; }
+        .color-box { width: 30px; height: 18px; margin-right: 12px; border: 1px solid #555; border-radius: 3px; box-shadow: 1px 1px 3px rgba(0,0,0,0.2); }
+        
+        .c-muy-bajo { background: #3182bd; }
+        .c-bajo { background: #9ecae1; }
+        .c-moderado { background: #a1d99b; }
+        .c-alto { background: #ffeda0; }
+        .c-muy-alto { background: #feb24c; }
+        .c-extremo { background: #f03b20; }
+        .c-nubes { background: rgba(255,255,255,0.85); border: 1.5px dashed #666; }
+        
+        #tooltip { 
+            position: absolute; background: rgba(255,255,255,0.95); padding: 10px 15px; 
+            border: 1px solid #333; border-radius: 6px; pointer-events: none; display: none; 
+            z-index: 2000; font-size: 0.95em; line-height: 1.4; box-shadow: 2px 2px 10px rgba(0,0,0,0.3); color: #222; 
+        }
+    </style>
 </head>
 <body>
-
-    <!-- Panel lateral flotante de controles -->
     <div id="control-panel">
         <h2>Riesgo de incendio</h2>
         <p class="subtitle">Modelo Deep Learning</p>
@@ -32,26 +65,19 @@
         <label for="opacity-slider" style="margin-top: 15px; display:block;"><strong>Transparencia de la capa de riesgo:</strong></label>
         <input type="range" id="opacity-slider" min="0" max="1" step="0.05" value="0.75">
         
-        <!-- El contenedor vacío que nuestro app.js rellenará automáticamente con la escala AEMET -->
         <div id="legend-container"></div>
         
         <div class="info-box">
-            <!-- Contenedor dinámico para las fechas -->
             <p id="update-date">Cargando telemetría...</p>
             <p style="font-size: 0.8em; color: #666; margin-top: 10px;">Datos obtenidos de AEMET y COPERNICUS</p>
         </div>
     </div>
 
-    <!-- Contenedor del mapa a pantalla completa -->
     <div id="map"></div>
-    
-    <!-- Elemento flotante para el cursor -->
     <div id="tooltip"></div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
-    <!-- Scripts con truco anti-caché para forzar la actualización en el navegador -->
-    <script src="config.js?v=2"></script>
-    <script src="app.js?v=2"></script>
+    <script src="config.js?v=3"></script>
+    <script src="app.js?v=3"></script>
 </body>
 </html>
