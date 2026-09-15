@@ -41,45 +41,15 @@ BBOX_CANARIAS = {
     "Fuerteventura": [-14.52, 28.01, -13.82, 28.76]
 }
 
-
-# MÓDULO DE INGESTA SATELITAL Y METEOROLÓGICA
-
 def seleccionar_isla() -> str:
-    """
-    Solicita interactivamente por consola la isla a analizar.
-
-    Returns
-    -------
-    str
-        Nombre exacto de la isla validado contra la constante BBOX_CANARIAS.
-    """
     print("Modelo probabilístico de riesgo de incendio con Deep Learning")
     print("Islas disponibles:", ", ".join(BBOX_CANARIAS.keys()))
-    
     isla = input("\nIntroduce la isla a analizar: ").strip()
     while isla not in BBOX_CANARIAS:
         isla = input("Isla no válida. Escribe el nombre exacto de la lista: ").strip()
-        
     return isla
 
 def descargar_satelite(isla: str, proyecto_gcp: str = "tfm-bbdd-499813") -> tuple:
-    """
-    Descarga la última imagen Sentinel-2 utilizando geemap para trocear internamente
-    la petición y evadir el límite estricto de 48MB de la API de Earth Engine.
-
-    Parameters
-    ----------
-    isla : str
-        Nombre de la isla objetivo.
-    proyecto_gcp : str, opcional
-        ID del proyecto en Google Cloud para autenticación de Earth Engine.
-
-    Returns
-    -------
-    tuple
-        (ruta_salida, fecha_captura) con la ubicación local del archivo GeoTIFF y su fecha.
-    """
-    
     print(f"\nBuscando la última imagen de la constelación Sentinel-2 para {isla}...")
     ee.Initialize(project=proyecto_gcp)
     
@@ -111,31 +81,12 @@ def descargar_satelite(isla: str, proyecto_gcp: str = "tfm-bbdd-499813") -> tupl
         scale=10,
         crs='EPSG:32628'
     )
-    
     return ruta_salida, fecha_captura
 
 def descargar_meteo_malla(isla: str, coords_utm: list) -> np.ndarray:
-    """
-    Genero una cuadrícula perimetral sobre la isla, descargo la predicción 
-    del modelo AROME y aplico interpolación espacial para asignar a cada 
-    parche de 64x64 su microclima exacto.
-
-    Parameters
-    ----------
-    isla : str
-        Nombre de la isla a analizar.
-    coords_utm : list
-        Lista de tuplas (X, Y) con los centroides UTM de cada parche de imagen.
-
-    Returns
-    -------
-    np.ndarray
-        Matriz de dimensiones (N_parches, 3) estructurada como [Temp, HR, Viento].
-    """
     print(f"\ndescargando datos meteorológicos del HARMONIE-AROME e interpolando geografía...")
     bbox = BBOX_CANARIAS[isla]
     
-    # construyo una malla de 5x5 puntos sobre el Bounding Box de la isla
     lats = np.linspace(bbox[1], bbox[3], 5)
     lons = np.linspace(bbox[0], bbox[2], 5)
     malla_lons, malla_lats = np.meshgrid(lons, lats)
@@ -150,18 +101,15 @@ def descargar_meteo_malla(isla: str, coords_utm: list) -> np.ndarray:
         "forecast_days": 1
     }
     
-    # escudo de seguridad: sistema de reintentos contra micro-cortes de la API
     max_reintentos = 3
     for intento in range(max_reintentos):
         try:
             respuesta_raw = requests.get(url, params=parametros, timeout=15)
             respuesta_raw.raise_for_status() 
             respuesta = respuesta_raw.json()
-            
             if isinstance(respuesta, dict) and respuesta.get("error"):
                 raise RuntimeError(f"la API de Open-Meteo rechazó la conexión: {respuesta.get('reason')}")
             break
-            
         except requests.exceptions.RequestException as e:
             if intento < max_reintentos - 1:
                 print(f"⚠️ aviso: micro-corte en Open-Meteo. reintentando en 5 segundos... (intento {intento+1}/{max_reintentos})")
@@ -169,13 +117,11 @@ def descargar_meteo_malla(isla: str, coords_utm: list) -> np.ndarray:
             else:
                 raise RuntimeError(f"fallo definitivo de Open-Meteo tras {max_reintentos} intentos: {e}")
     
-    # aíslo los registros de las 12:00h (índice 12) como referencia del mediodía
     t_malla = [loc['hourly']['temperature_2m'][12] for loc in respuesta]
     hr_malla = [loc['hourly']['relative_humidity_2m'][12] for loc in respuesta]
     v_malla = [loc['hourly']['wind_speed_10m'][12] for loc in respuesta]
     puntos_origen = np.column_stack((malla_lons.flatten(), malla_lats.flatten()))
     
-    # convierto los centroides UTM a Lat/Lon para alinear el sistema de coordenadas
     transformador = pyproj.Transformer.from_crs("EPSG:32628", "EPSG:4326", always_xy=True)
     lons_parches, lats_parches = transformador.transform(
         [c[0] for c in coords_utm],
@@ -183,12 +129,10 @@ def descargar_meteo_malla(isla: str, coords_utm: list) -> np.ndarray:
     )
     puntos_destino = np.column_stack((lons_parches, lats_parches))
     
-    # ejecuto el cruce espacial por interpolación bilineal
     t_interp = griddata(puntos_origen, t_malla, puntos_destino, method='linear')
     hr_interp = griddata(puntos_origen, hr_malla, puntos_destino, method='linear')
     v_interp = griddata(puntos_origen, v_malla, puntos_destino, method='linear')
     
-    # soluciono los parches periféricos (NaN) usando el nodo de la malla más cercano
     if np.isnan(t_interp).any():
         mascara_nan = np.isnan(t_interp)
         t_interp[mascara_nan] = griddata(puntos_origen, t_malla, puntos_destino[mascara_nan], method='nearest')
@@ -197,32 +141,13 @@ def descargar_meteo_malla(isla: str, coords_utm: list) -> np.ndarray:
         
     return np.column_stack((t_interp, hr_interp, v_interp))
 
-
-# MÓDULO DE INFERENCIA Y CARTOGRAFÍA
-
 def calcular_mascaras_fisicas(ruta: str) -> tuple:
-    """
-    Leo el archivo TIFF en crudo y aplico álgebra de mapas para aislar 
-    el océano de la tierra y la zona urbana de la masa forestal.
-
-    Parameters
-    ----------
-    ruta : str
-        Ruta local del GeoTIFF satelital.
-
-    Returns
-    -------
-    tuple
-        (Matriz bruta 3D, Máscara binaria litoral, Máscara binaria forestal, Perfil de Rasterio)
-    """
     print("\nprocesando reflectancia y delimitando el litoral...")
     with rasterio.open(ruta) as src:
         raster_data = src.read()
         perfil_geo = src.profile
         
     imagen_bruta = np.transpose(raster_data, (1, 2, 0)).astype(np.float32)
-    
-    # libero el búfer nativo para no asfixiar la RAM en islas grandes (ej. Tenerife)
     del raster_data
     gc.collect()
         
@@ -243,28 +168,6 @@ def calcular_mascaras_fisicas(ruta: str) -> tuple:
 
 def extraer_parches_solapados(imagen_bruta: np.ndarray, mascara_vegetacion: np.ndarray, 
                               perfil: dict, tamano: int = 64, solape: int = 4) -> tuple:
-    """
-    Paso una ventana deslizante sobre la matriz satelital recortando tensores
-    allí donde existe vegetación, guardando su anclaje UTM exacto.
-
-    Parameters
-    ----------
-    imagen_bruta : np.ndarray
-        Array 3D con la reflectancia.
-    mascara_vegetacion : np.ndarray
-        Array 2D binario que valida el bioma.
-    perfil : dict
-        Metadatos espaciales de Rasterio para la transformación afín.
-    tamano : int, opcional
-        Resolución de entrada de la CNN (por defecto 64x64).
-    solape : int, opcional
-        Número de píxeles superpuestos para suavizar la cartografía.
-
-    Returns
-    -------
-    tuple
-        (Matriz de tensores, Coordenadas internas (fil, col), Coordenadas UTM, Dimensiones originales)
-    """
     print(f"\ngenerando parches de inferencia ({tamano}x{tamano} px, {solape}px solape)...")
     filas_totales, cols_totales, _ = imagen_bruta.shape
     paso = tamano - solape
@@ -282,16 +185,12 @@ def extraer_parches_solapados(imagen_bruta: np.ndarray, mascara_vegetacion: np.n
                 utm_x, utm_y = rasterio.transform.xy(transform, centro_f, centro_c)
                 coords_utm.append((utm_x, utm_y))
                 
-    # destrucción forzosa de la imagen gigante en RAM antes de retornar los fragmentos
     del imagen_bruta, mascara_vegetacion
     gc.collect()
-                
     return np.array(parches), coordenadas, coords_utm, (filas_totales, cols_totales)
 
 def predecir_riesgo(tensores_satelite: np.ndarray, meteo_matriz: np.ndarray) -> np.ndarray:
-    """Ejecuta la inferencia alimentando el modelo Late Fusion con las dos ramas de datos."""
     print("\ncalculando probabilidad de riesgo mediante el modelo neuronal...")
-
     original_from_config = keras.layers.Dense.from_config
     @classmethod
     def patched_from_config(cls, config):
@@ -308,11 +207,6 @@ def predecir_riesgo(tensores_satelite: np.ndarray, meteo_matriz: np.ndarray) -> 
 def reconstruir_mapa_calor(predicciones: np.ndarray, coordenadas: list, dimensiones_base: tuple, 
                            m_tierra: np.ndarray, m_vegetacion: np.ndarray, perfil: dict, 
                            ruta_salida: str, tamano: int = 64) -> None:
-    """
-    Fusiona las predicciones de los miles de parches sueltos de vuelta en un lienzo único,
-    promediando el riesgo en las zonas solapadas y aplicando la máscara insular.
-    """
-    print("consolidando matriz cartográfica...")
     filas, columnas = dimensiones_base
     mapa_riesgo = np.zeros((filas, columnas), dtype=np.float32)
     mapa_conteo = np.zeros((filas, columnas), dtype=np.float32)
@@ -334,60 +228,32 @@ def reconstruir_mapa_calor(predicciones: np.ndarray, coordenadas: list, dimensio
         dest.write(mapa_final, 1)
 
 def obtener_cmap_personalizado() -> LinearSegmentedColormap:
-    """Mapeo de colores estandarizado según la escala táctica de CECOPIN."""
+    # Escala estandarizada AEMET para incendios (Azul -> Rojo)
     nodos = [
-        (0.00, '#228B22'), (0.30, '#ADFF2F'), (0.45, '#FFA500'), 
-        (0.60, '#FF0000'), (0.85, '#800080'), (1.00, '#F8E6FF')
+        (0.00, '#3182bd'), # Muy bajo (Azul oscuro)
+        (0.10, '#9ecae1'), # Bajo (Azul claro)
+        (0.20, '#a1d99b'), # Moderado (Verde)
+        (0.40, '#ffeda0'), # Alto (Amarillo)
+        (0.50, '#feb24c'), # Muy Alto (Naranja)
+        (0.60, '#f03b20'), # Extremo (Rojo)
+        (1.00, '#800026')  # Más allá del 60% se oscurece
     ]
-    cmap = LinearSegmentedColormap.from_list("RiesgoCanarias", nodos)
+    cmap = LinearSegmentedColormap.from_list("RiesgoAEMET", nodos)
     cmap.set_under('black', alpha=0.0) 
     cmap.set_bad('black', alpha=0.0)
     return cmap
 
-def exportar_dashboard_png(ruta_tif: str, isla: str, ruta_png: str) -> None:
-    """Dibuja un dashboard de impacto visual directo usando la librería OSMnx."""
-    print(f"\nrenderizando cartografía estática (PNG)...")
-    frontera = ox.geocode_to_gdf(f"{isla}, Canarias, España")
-    cmap_riesgo = obtener_cmap_personalizado()
-    
-    with rasterio.open(ruta_tif) as src:
-        mapa_riesgo = src.read(1)
-        limites = src.bounds
-        extension_utm = [limites.left, limites.right, limites.bottom, limites.top]
-        frontera_utm = frontera.to_crs(src.crs)
-        
-        fig, ax = plt.subplots(figsize=(10, 10), dpi=200)
-        ax.set_facecolor('white') 
-        
-        im = ax.imshow(mapa_riesgo, cmap=cmap_riesgo, vmin=0.01, vmax=1.0, extent=extension_utm)
-        frontera_utm.boundary.plot(ax=ax, color='black', linewidth=1.0)
-        
-        ax.set_xlim(limites.left, limites.right)
-        ax.set_ylim(limites.bottom, limites.top)
-    
-        plt.colorbar(im, ax=ax, label="Probabilidad de riesgo de incendio (0.0 - 1.0)", shrink=0.7)
-        ax.set_title(f"Mapa de riesgo forestal - {isla}", fontsize=15, fontweight='bold')
-        ax.axis('off')
-        
-        plt.savefig(ruta_png, bbox_inches='tight', facecolor='white')
-        plt.close()
-
-def exportar_visor_interactivo(ruta_tif_riesgo: str, ruta_tif_temp: str, ruta_raw: str, 
-                               isla: str, dir_salida: str, fecha_sat: str) -> list:
-    """
-    Fuerza la reproyección del modelo a coordenadas esféricas (EPSG:4326) para 
-    compatibilidad web, extrayendo las capas base en PNG y el array de predicciones en JSON.
-    """
+def exportar_visor_interactivo(ruta_tif_riesgo: str, ruta_tif_temp: str, ruta_tif_hr: str, 
+                               ruta_tif_v: str, ruta_raw: str, isla: str, dir_salida: str) -> list:
     print(f"\nextrayendo capas puras y variables JavaScript para el visor web ({isla})...")
     
     ruta_base_png = os.path.join(dir_salida, f"base_rgb_{isla.replace(' ', '_')}.png")
     ruta_riesgo_png = os.path.join(dir_salida, f"capa_riesgo_{isla.replace(' ', '_')}.png")
     ruta_datos_js = os.path.join(dir_salida, f"datos_{isla.replace(' ', '_')}.js")
-    ruta_leyenda = os.path.join(dir_salida, "leyenda.png")
     
     cmap_riesgo = obtener_cmap_personalizado()
     
-    # 1. reproyección táctica a EPSG:4326
+    # Reproyección táctica del riesgo a EPSG:4326
     with rasterio.open(ruta_tif_riesgo) as src_riesgo:
         transform_4326, width_4326, height_4326 = calculate_default_transform(
             src_riesgo.crs, 'EPSG:4326', src_riesgo.width, src_riesgo.height, *src_riesgo.bounds
@@ -404,7 +270,6 @@ def exportar_visor_interactivo(ruta_tif_riesgo: str, ruta_tif_temp: str, ruta_ra
         )
         lon_min, lat_min, lon_max, lat_max = array_bounds(height_4326, width_4326, transform_4326)
         
-        # intercepto nubosidad directamente desde la banda azul del crudo
         with rasterio.open(ruta_raw) as src_raw:
             banda_azul = np.zeros((height_4326, width_4326), dtype=np.float32)
             reproject(
@@ -425,59 +290,41 @@ def exportar_visor_interactivo(ruta_tif_riesgo: str, ruta_tif_temp: str, ruta_ra
         
         Image.fromarray((rgba_img * 255).astype(np.uint8)).save(ruta_riesgo_png)
 
-    # 2. compresión de la cartografía y meteo para la capa interactiva del cursor web
-    with rasterio.open(ruta_tif_temp) as src_t:
-        temp_4326 = np.zeros((height_4326, width_4326), dtype=np.float32)
-        reproject(
-            source=rasterio.band(src_t, 1),
-            destination=temp_4326,
-            src_transform=src_t.transform,
-            src_crs=src_t.crs,
-            dst_transform=transform_4326,
-            dst_crs='EPSG:4326',
-            resampling=Resampling.nearest
-        )
+    # Función auxiliar para reproyectar capas meteo de forma limpia
+    def reproyectar_meteo(ruta_tif):
+        with rasterio.open(ruta_tif) as src_meteo:
+            matriz_4326 = np.zeros((height_4326, width_4326), dtype=np.float32)
+            reproject(
+                source=rasterio.band(src_meteo, 1),
+                destination=matriz_4326,
+                src_transform=src_meteo.transform,
+                src_crs=src_meteo.crs,
+                dst_transform=transform_4326,
+                dst_crs='EPSG:4326',
+                resampling=Resampling.nearest
+            )
+            return matriz_4326
+
+    temp_4326 = reproyectar_meteo(ruta_tif_temp)
+    hr_4326 = reproyectar_meteo(ruta_tif_hr)
+    v_4326 = reproyectar_meteo(ruta_tif_v)
         
-        factor_json = max(1, max(height_4326, width_4326) // 250) 
-        arr_r_json = mapa_4326[::factor_json, ::factor_json]
-        arr_t_json = temp_4326[::factor_json, ::factor_json]
-        
-        with open(ruta_datos_js, 'w', encoding='utf-8') as f:
-            f.write(f"window.datos_{isla.replace(' ', '_')} = {{\n")
-            f.write(f"  riesgo: {json.dumps(np.nan_to_num(arr_r_json, nan=-1.0).round(2).tolist())},\n")
-            f.write(f"  temp: {json.dumps(np.nan_to_num(arr_t_json, nan=-99.0).round(1).tolist())},\n")
-            f.write(f"  gridH: {int(height_4326 // factor_json)},\n")
-            f.write(f"  gridW: {int(width_4326 // factor_json)}\n")
-            f.write("};\n")
-
-    # 3. renderizado gráfico de la leyenda explicativa
-    fig_leg, ax_leg = plt.subplots(figsize=(8, 1.5), dpi=150)
-    fig_leg.subplots_adjust(bottom=0.4, top=0.7)
-    cb = plt.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(0, 1), cmap=cmap_riesgo),
-                      cax=ax_leg, orientation='horizontal')
-    cb.set_label('Probabilidad de Riesgo (0.0 a 1.0)', fontsize=12, fontweight='bold')
+    factor_json = max(1, max(height_4326, width_4326) // 250) 
     
-    nube_patch = mpatches.Patch(color='#FFFFFF', ec='#888888', label='Nubes (Área sin datos)')
-    fig_leg.legend(handles=[nube_patch], loc='upper center', bbox_to_anchor=(0.5, 1.4), frameon=False, fontsize=11)
-    
-    plt.savefig(ruta_leyenda, bbox_inches='tight', transparent=True)
-    plt.close()
+    with open(ruta_datos_js, 'w', encoding='utf-8') as f:
+        f.write(f"window.datos_{isla.replace(' ', '_')} = {{\n")
+        f.write(f"  riesgo: {json.dumps(np.nan_to_num(mapa_4326[::factor_json, ::factor_json], nan=-1.0).round(2).tolist())},\n")
+        f.write(f"  temp: {json.dumps(np.nan_to_num(temp_4326[::factor_json, ::factor_json], nan=-99.0).round(1).tolist())},\n")
+        f.write(f"  hr: {json.dumps(np.nan_to_num(hr_4326[::factor_json, ::factor_json], nan=-99.0).round(1).tolist())},\n")
+        f.write(f"  viento: {json.dumps(np.nan_to_num(v_4326[::factor_json, ::factor_json], nan=-99.0).round(1).tolist())},\n")
+        f.write(f"  gridH: {int(height_4326 // factor_json)},\n")
+        f.write(f"  gridW: {int(width_4326 // factor_json)}\n")
+        f.write("};\n")
 
-    # 4. extracción visual del satélite en color real (RGB)
-    with rasterio.open(ruta_raw) as src_raw:
-        factor = max(1, max(src_raw.height, src_raw.width) // 2000)
-        h_new, w_new = src_raw.height // factor, src_raw.width // factor
-        b_blue = src_raw.read(1, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
-        b_green = src_raw.read(2, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
-        b_red = src_raw.read(3, out_shape=(h_new, w_new), resampling=rasterio.enums.Resampling.bilinear)
-        rgb = np.clip(np.dstack((b_red, b_green, b_blue)) / 3000.0, 0, 1) 
-        Image.fromarray((rgb * 255).astype(np.uint8)).save(ruta_base_png)
-
-    print(f"-> Archivos web (JS y PNGs) exportados y optimizados para {isla}.")
     return [[lat_min, lon_min], [lat_max, lon_max]]
 
 
-# BLOQUE PRINCIPAL DE EJECUCIÓN (ENTRY POINT)
+# BLOQUE PRINCIPAL DE EJECUCIÓN
 
 if __name__ == "__main__":
     print("🚀 iniciando automatización masiva predictiva...")
@@ -486,10 +333,9 @@ if __name__ == "__main__":
     os.makedirs(dir_docs, exist_ok=True)
     
     config_docs = {
-        "bounds": {}
+        "islas": {}
     }
     
-    # escaneo secuencial isla por isla
     for isla in BBOX_CANARIAS.keys():
         try:
             print(f"\n{'='*50}\n🛰️ PROCESANDO: {isla}\n{'='*50}")
@@ -501,16 +347,30 @@ if __name__ == "__main__":
             if len(tensores) > 0:
                 meteo_matriz = descargar_meteo_malla(isla, coords_utm)
                 riesgos = predecir_riesgo(tensores, meteo_matriz)
+                
+                # Desglosamos todas las variables para exportarlas
                 temperaturas = meteo_matriz[:, 0]
+                humedades = meteo_matriz[:, 1]
+                vientos = meteo_matriz[:, 2]
                 
                 ruta_export_tif = os.path.join(dir_docs, f'riesgo_{isla.replace(" ", "_")}.tif')
                 ruta_export_temp = os.path.join(dir_docs, f'temp_{isla.replace(" ", "_")}.tif')
+                ruta_export_hr = os.path.join(dir_docs, f'hr_{isla.replace(" ", "_")}.tif')
+                ruta_export_v = os.path.join(dir_docs, f'viento_{isla.replace(" ", "_")}.tif')
                 
+                print("consolidando matrices cartográficas...")
                 reconstruir_mapa_calor(riesgos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_tif)
                 reconstruir_mapa_calor(temperaturas, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_temp)
+                reconstruir_mapa_calor(humedades, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_hr)
+                reconstruir_mapa_calor(vientos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_v)
                 
-                bounds_isla = exportar_visor_interactivo(ruta_export_tif, ruta_export_temp, ruta_raw, isla, dir_docs, fecha_satelite)
-                config_docs["bounds"][isla] = bounds_isla
+                bounds_isla = exportar_visor_interactivo(ruta_export_tif, ruta_export_temp, ruta_export_hr, ruta_export_v, ruta_raw, isla, dir_docs)
+                
+                # Guardamos los metadatos específicos de la isla
+                config_docs["islas"][isla] = {
+                    "bounds": bounds_isla,
+                    "fecha_sat": fecha_satelite
+                }
                 
                 print(f"\n✅ {isla} completada con éxito. riesgo máximo detectado: {np.max(riesgos)*100:.1f}%")
             else:
