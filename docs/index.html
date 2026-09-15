@@ -7,8 +7,9 @@
     
     <!-- Librería Leaflet para Mapas -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <!-- Nuestro estilo personalizado -->
-    <link rel="stylesheet" href="style.css" />
+    
+    <!-- Nuestro estilo personalizado (CON TRUCO ANTI-CACHÉ ?v=2) -->
+    <link rel="stylesheet" href="style.css?v=2" />
 </head>
 <body>
 
@@ -31,13 +32,12 @@
         <label for="opacity-slider" style="margin-top: 15px; display:block;"><strong>Transparencia de la capa de riesgo:</strong></label>
         <input type="range" id="opacity-slider" min="0" max="1" step="0.05" value="0.75">
         
-        <div id="legend-container">
-            <p style="margin-bottom: 5px; font-size: 0.9em; font-weight: bold;">Nivel de probabilidad</p>
-            <img id="map-legend" src="leyenda.png" alt="Leyenda" style="width: 100%;">
-        </div>
+        <!-- El contenedor vacío que nuestro app.js rellenará automáticamente con la escala AEMET -->
+        <div id="legend-container"></div>
         
         <div class="info-box">
-            <p><strong>Última actualización:</strong> <span id="update-date">2026-09-12</span></p>
+            <!-- Contenedor dinámico para las fechas -->
+            <p id="update-date">Cargando telemetría...</p>
             <p style="font-size: 0.8em; color: #666; margin-top: 10px;">Datos obtenidos de AEMET y COPERNICUS</p>
         </div>
     </div>
@@ -46,10 +46,12 @@
     <div id="map"></div>
     
     <!-- Elemento flotante para el cursor -->
-    <div id="tooltip" style="position: absolute; background: rgba(0,0,0,0.85); color: #fff; padding: 8px 12px; border-radius: 5px; font-size: 14px; display: none; z-index: 9999; pointer-events: none; text-align: left; box-shadow: 0px 4px 6px rgba(0,0,0,0.3);"></div>
+    <div id="tooltip"></div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="config.js"></script>
-    <script src="app.js"></script>
+    
+    <!-- Scripts con truco anti-caché para forzar la actualización en el navegador -->
+    <script src="config.js?v=2"></script>
+    <script src="app.js?v=2"></script>
 </body>
 </html>
