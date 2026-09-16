@@ -1,4 +1,4 @@
-\# 🔥 IA \& MLOps: Prevención de incendios forestales en Canarias#
+# 🔥 IA \& MLOps: Prevención de incendios forestales en Canarias
 
 
 
