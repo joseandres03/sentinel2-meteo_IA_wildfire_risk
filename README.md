@@ -2,15 +2,15 @@
 
 
 
-\[!\[Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+\[Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 
-\[!\[TensorFlow](https://img.shields.io/badge/TensorFlow-2.15%2B-FF6F00.svg?logo=tensorflow)](https://www.tensorflow.org/)
+\[TensorFlow](https://img.shields.io/badge/TensorFlow-2.15%2B-FF6F00.svg?logo=tensorflow)](https://www.tensorflow.org/)
 
-\[!\[EarthEngine](https://img.shields.io/badge/Google%20Earth%20Engine-API-34A853.svg)](https://earthengine.google.com/)
+\[EarthEngine](https://img.shields.io/badge/Google%20Earth%20Engine-API-34A853.svg)](https://earthengine.google.com/)
 
-\[!\[MLOps](https://img.shields.io/badge/CI%2FCD-GitHub\_Actions-2088FF.svg)](https://github.com/features/actions)
+\[MLOps](https://img.shields.io/badge/CI%2FCD-GitHub\_Actions-2088FF.svg)](https://github.com/features/actions)
 
-\[!\[Leaflet](https://img.shields.io/badge/Frontend-Leaflet-199900.svg?logo=leaflet)](https://leafletjs.com/)
+\[Leaflet](https://img.shields.io/badge/Frontend-Leaflet-199900.svg?logo=leaflet)](https://leafletjs.com/)
 
 
 
