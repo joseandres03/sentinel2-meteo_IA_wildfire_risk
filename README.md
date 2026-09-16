@@ -40,9 +40,9 @@ Este repositorio aloja la infraestructura completa de un Trabajo de Fin de Mást
 
 La red neuronal aprende de dos naturalezas de datos diametralmente opuestas:
 
-1. \*\*Rama de Visión Espacial (CNN):\*\* Extrae la orografía y el estrés hídrico de la biomasa forestal procesando tensores de 64x64x6 (6 bandas multiespectrales de Sentinel-2), previamente filtrados mediante álgebra de mapas (NDWI para enmascarar océano y embalses, y NDVI para descartar núcleos urbanos/roca).
+1. **Rama de Visión Espacial (CNN):** Extrae la orografía y el estrés hídrico de la biomasa forestal procesando tensores de 64x64x6 (6 bandas multiespectrales de Sentinel-2), previamente filtrados mediante álgebra de mapas (NDWI para enmascarar océano y embalses, y NDVI para descartar núcleos urbanos/roca).
 
-2. \*\*Rama meteorológica (MLP):\*\* Procesa el microclima exacto interpolado para ese punto geográfico (Temperatura, Humedad Relativa y Viento), alimentado por el modelo HARMONIE-AROME (AEMET) y Open-Meteo.
+2. **Rama meteorológica (MLP):** Procesa el microclima exacto interpolado para ese punto geográfico (Temperatura, Humedad Relativa y Viento), alimentado por el modelo HARMONIE-AROME (AEMET) y Open-Meteo.
 
 
 
