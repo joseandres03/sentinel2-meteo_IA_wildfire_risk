@@ -1,0 +1,15 @@
+numpy
+pandas
+matplotlib
+seaborn
+requests
+Pillow
+scipy
+geemap
+earthengine-api
+osmnx
+geopandas
+rasterio
+tensorflow
+scikit-learn
+joblib
