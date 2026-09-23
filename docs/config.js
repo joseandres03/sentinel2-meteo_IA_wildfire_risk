@@ -65,6 +65,19 @@ const configWeb = {
             ],
             "fecha_sat": "2026-09-21"
         },
+        "Lanzarote": {
+            "bounds": [
+                [
+                    28.823957180304102,
+                    -13.914537070112212
+                ],
+                [
+                    29.26600701888792,
+                    -13.323056438785589
+                ]
+            ],
+            "fecha_sat": "2026-09-21"
+        },
         "Fuerteventura": {
             "bounds": [
                 [
@@ -79,5 +92,5 @@ const configWeb = {
             "fecha_sat": "2026-09-21"
         }
     },
-    "fecha_actualizacion": "2026-09-22 04:37"
+    "fecha_actualizacion": "2026-09-23 04:38"
 };
