@@ -1,5 +1,18 @@
 const configWeb = {
     "islas": {
+        "La Gomera": {
+            "bounds": [
+                [
+                    28.00549084316792,
+                    -17.374943281524075
+                ],
+                [
+                    28.23459328764559,
+                    -17.085678399275903
+                ]
+            ],
+            "fecha_sat": "2026-09-29"
+        },
         "Gran Canaria": {
             "bounds": [
                 [
@@ -24,7 +37,7 @@ const configWeb = {
                     -17.709141528583167
                 ]
             ],
-            "fecha_sat": "2026-09-26"
+            "fecha_sat": "2026-09-29"
         },
         "El Hierro": {
             "bounds": [
@@ -37,7 +50,7 @@ const configWeb = {
                     -17.873688515992534
                 ]
             ],
-            "fecha_sat": "2026-09-26"
+            "fecha_sat": "2026-09-29"
         },
         "Lanzarote": {
             "bounds": [
@@ -66,5 +79,5 @@ const configWeb = {
             "fecha_sat": "2026-09-28"
         }
     },
-    "fecha_actualizacion": "2026-09-29 05:33"
+    "fecha_actualizacion": "2026-09-30 05:17"
 };
