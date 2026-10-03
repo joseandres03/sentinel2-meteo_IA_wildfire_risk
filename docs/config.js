@@ -92,5 +92,5 @@ const configWeb = {
             "fecha_sat": "2026-09-30"
         }
     },
-    "fecha_actualizacion": "2026-10-02 05:22"
+    "fecha_actualizacion": "2026-10-03 05:05"
 };
