@@ -11,7 +11,7 @@ const configWeb = {
                     -17.085678399275903
                 ]
             ],
-            "fecha_sat": "2026-10-01"
+            "fecha_sat": "2026-10-03"
         },
         "Tenerife": {
             "bounds": [
@@ -24,7 +24,7 @@ const configWeb = {
                     -16.10359428244968
                 ]
             ],
-            "fecha_sat": "2026-10-01"
+            "fecha_sat": "2026-10-03"
         },
         "Gran Canaria": {
             "bounds": [
@@ -37,7 +37,7 @@ const configWeb = {
                     -15.358368388662361
                 ]
             ],
-            "fecha_sat": "2026-10-01"
+            "fecha_sat": "2026-10-03"
         },
         "La Palma": {
             "bounds": [
@@ -50,7 +50,7 @@ const configWeb = {
                     -17.709141528583167
                 ]
             ],
-            "fecha_sat": "2026-10-01"
+            "fecha_sat": "2026-10-03"
         },
         "El Hierro": {
             "bounds": [
@@ -63,7 +63,7 @@ const configWeb = {
                     -17.873688515992534
                 ]
             ],
-            "fecha_sat": "2026-10-01"
+            "fecha_sat": "2026-10-03"
         },
         "Lanzarote": {
             "bounds": [
@@ -76,7 +76,7 @@ const configWeb = {
                     -13.323056438785589
                 ]
             ],
-            "fecha_sat": "2026-09-30"
+            "fecha_sat": "2026-10-03"
         },
         "Fuerteventura": {
             "bounds": [
@@ -89,8 +89,8 @@ const configWeb = {
                     -13.811610759256126
                 ]
             ],
-            "fecha_sat": "2026-09-30"
+            "fecha_sat": "2026-10-03"
         }
     },
-    "fecha_actualizacion": "2026-10-03 05:05"
+    "fecha_actualizacion": "2026-10-04 05:37"
 };
