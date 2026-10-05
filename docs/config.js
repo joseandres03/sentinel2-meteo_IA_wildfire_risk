@@ -11,7 +11,7 @@ const configWeb = {
                     -17.085678399275903
                 ]
             ],
-            "fecha_sat": "2026-10-03"
+            "fecha_sat": "2026-10-04"
         },
         "Tenerife": {
             "bounds": [
@@ -50,7 +50,7 @@ const configWeb = {
                     -17.709141528583167
                 ]
             ],
-            "fecha_sat": "2026-10-03"
+            "fecha_sat": "2026-10-04"
         },
         "El Hierro": {
             "bounds": [
@@ -63,7 +63,7 @@ const configWeb = {
                     -17.873688515992534
                 ]
             ],
-            "fecha_sat": "2026-10-03"
+            "fecha_sat": "2026-10-04"
         },
         "Lanzarote": {
             "bounds": [
@@ -92,5 +92,5 @@ const configWeb = {
             "fecha_sat": "2026-10-03"
         }
     },
-    "fecha_actualizacion": "2026-10-04 05:37"
+    "fecha_actualizacion": "2026-10-05 05:23"
 };
