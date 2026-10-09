@@ -37,7 +37,7 @@ const configWeb = {
                     -15.358368388662361
                 ]
             ],
-            "fecha_sat": "2026-10-06"
+            "fecha_sat": "2026-10-08"
         },
         "La Palma": {
             "bounds": [
@@ -76,7 +76,7 @@ const configWeb = {
                     -13.323056438785589
                 ]
             ],
-            "fecha_sat": "2026-10-03"
+            "fecha_sat": "2026-10-08"
         },
         "Fuerteventura": {
             "bounds": [
@@ -89,8 +89,8 @@ const configWeb = {
                     -13.811610759256126
                 ]
             ],
-            "fecha_sat": "2026-10-03"
+            "fecha_sat": "2026-10-08"
         }
     },
-    "fecha_actualizacion": "2026-10-08 05:48"
+    "fecha_actualizacion": "2026-10-09 05:54"
 };
