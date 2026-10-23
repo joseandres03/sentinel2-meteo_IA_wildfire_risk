@@ -1,0 +1,21 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'tests/**', '.github/workflows/tests.yml']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Instalar dependencias de los tests
+        run: pip install numpy pandas scikit-learn pytest
+      - name: Ejecutar tests
+        run: pytest -q tests
