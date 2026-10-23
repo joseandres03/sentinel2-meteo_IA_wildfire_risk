@@ -55,15 +55,47 @@ El trabajo se presentó como TFM y el tribunal señaló puntos de mejora que se 
 
 | Limitación | Detalle | Mejora prevista |
 |---|---|---|
-| La variable objetivo no procede de incendios observados | La red aprende a aproximar un índice calculado con fórmulas a partir de sus propias entradas (meteorología y bandas B8/B11). El MAE de 0,0228 en test mide lo bien que reproduce ese índice, **no su capacidad de anticipar incendios reales**. | Entrenar con incendios históricos observados (áreas quemadas y focos activos) como etiqueta. |
+| La variable objetivo no procede de incendios observados | La red aprende a aproximar un índice calculado con fórmulas a partir de sus propias entradas (meteorología y bandas B8/B11). El MAE de 0,0228 en test mide lo bien que reproduce ese índice, **no su capacidad de anticipar incendios reales**. | Entrenar con incendios históricos observados como etiqueta (v2). |
 | Posible fuga espacial y temporal | La partición aleatoria 80/20 pone las mismas estaciones (mismo parche de 640 m) en entrenamiento y test. | Validación por bloques espaciales (islas o zonas) y separación temporal (entrenar con años anteriores y evaluar con años posteriores). |
 | Sin contraste externo | No se ha comparado el mapa con incendios ocurridos después del entrenamiento. | Evaluar con los incendios de las campañas más recientes. |
 | Métricas y calibración | Faltan sensibilidad, precisión, falsos positivos en zonas de riesgo alto y calibración de probabilidades. | Curvas ROC/PR, diagrama de fiabilidad y métricas por umbral de riesgo. |
 | Cambio de dominio | Se entrena con parches centrados en estaciones de AEMET y datos observados, y se predice sobre todo el territorio forestal con pronósticos. | Muestrear puntos en todo el territorio con vegetación. |
-| Nubes | La extracción de entrenamiento no aplica máscara de nubes; en producción solo se enmascaran para la visualización. | Máscara con la capa SCL de Sentinel-2 y composiciones sin nubes. |
-| Robustez del pipeline | No hay pruebas automáticas de tiempos de ejecución ni del comportamiento cuando falla una fuente de datos. | Tests, registro de tiempos y alternativas cuando falta una fuente. |
+| Nubes | La extracción de entrenamiento no aplica máscara de nubes. | Máscara SCL en producción (aplicada) y en el dataset v2. |
+| Robustez del pipeline | Cuando fallaba una isla, desaparecía del visor y no quedaba registro. | Reintentos, conservación del último mapa y `estado_pipeline.json` (aplicado). |
 
 Referencia de comparación recomendada por el tribunal: [mesogeos](https://github.com/paulinebecker2002/mesogeos).
+
+---
+
+## 🧪 Versión 2: entrenamiento y validación con incendios reales (en desarrollo)
+
+La v2 responde a las limitaciones anteriores cambiando **qué aprende el modelo**: en lugar de imitar un índice construido con fórmulas, aprende de **incendios observados**.
+
+| | v1 (TFM) | v2 |
+|---|---|---|
+| Etiqueta | Índice 0,35·meteo + 0,65·NDMI | 1 = empezó un incendio ese día en ese punto (focos FIRMS agrupados en eventos), 0 = sin incendio cerca |
+| Sentinel-2 | Imagen del mismo día, sin máscara de nubes | Mediana sin nubes (SCL) de los 30 días **previos** |
+| Meteorología | 58 estaciones AEMET | ERA5-Land diario en cualquier punto |
+| Ubicaciones | Alrededor de las estaciones | Todo el territorio con vegetación (ESA WorldCover) |
+| Validación | Partición aleatoria 80/20 | Bloques espaciales de 10 km, isla fuera y prueba con años posteriores (2024+) |
+| Métricas | MAE | ROC-AUC, PR-AUC, sensibilidad, falsos positivos, captura en el 10 % de mayor riesgo, fiabilidad (calibración) |
+| Modelos | CNN late fusion | Índice v1 como referencia, regresión logística, Random Forest, XGBoost; CNN opcional |
+
+**Cómo ejecutarla (Google Colab):**
+
+1. `notebooks/Cuaderno4_dataset_incendios_reales.ipynb`: descarga los focos FIRMS, genera eventos y negativos, y calcula las variables en Earth Engine. Produce `dataset_v2.csv`.
+2. `notebooks/Cuaderno5_modelado_validacion.ipynb`: compara modelos con validación espacial, evalúa con incendios de 2024 en adelante, calibra y guarda el modelo y las métricas.
+
+La lógica reutilizable está en el paquete [`src/wildfire`](src/wildfire), cubierto por tests (`pytest tests`) que se ejecutan en GitHub Actions.
+
+**Estado:** el código de la v2 está implementado y probado con datos sintéticos. Falta ejecutarlo con los datos reales y, si los resultados lo justifican, sustituir el modelo de producción.
+
+### Mejoras ya aplicadas al pipeline de producción
+
+- **Nubes:** composición del último píxel despejado según la capa SCL de Sentinel-2.
+- **Unidades:** el viento de Open-Meteo se pide en m/s, que es la unidad con la que se entrenó el modelo (AEMET). Antes llegaba en km/h.
+- **Tolerancia a fallos:** cada isla se reintenta. Si falla, se conserva su último mapa marcado como desactualizado, en lugar de desaparecer del visor.
+- **Trazabilidad:** `docs/estado_pipeline.json` registra en cada ejecución el estado de cada isla, los tiempos por etapa y los errores.
 
 ---
 
@@ -73,13 +105,17 @@ Referencia de comparación recomendada por el tribunal: [mesogeos](https://githu
 ├── docs/               # Visor web (HTML, CSS, JS) y capas publicadas
 ├── models/             # Modelo (.keras) y escalador meteorológico (.pkl)
 ├── notebooks/
-│   ├── Cuaderno1.ipynb # Ingesta histórica de AEMET y Sentinel-2 (dataset bruto)
-│   ├── Cuaderno2.ipynb # Limpieza, imputación KNN, índices espectrales y variable objetivo
-│   └── Cuaderno3.ipynb # Entrenamiento y evaluación del modelo late fusion
+│   ├── Cuaderno1.ipynb # v1 · Ingesta histórica de AEMET y Sentinel-2 (dataset bruto)
+│   ├── Cuaderno2.ipynb # v1 · Limpieza, imputación KNN, índices espectrales y variable objetivo
+│   ├── Cuaderno3.ipynb # v1 · Entrenamiento y evaluación del modelo late fusion
+│   ├── Cuaderno4_dataset_incendios_reales.ipynb  # v2 · Dataset etiquetado con incendios FIRMS
+│   └── Cuaderno5_modelado_validacion.ipynb       # v2 · Modelos, validación espacial/temporal y calibración
 ├── pdf/                # Memoria del TFM
 ├── src/
-│   └── pipeline.py     # Pipeline de producción ejecutado por GitHub Actions
-├── .github/workflows/  # Workflow de actualización diaria
+│   ├── pipeline.py     # Pipeline de producción ejecutado por GitHub Actions
+│   └── wildfire/       # Paquete v2: índices, etiquetas, validación, ERA5 y Earth Engine
+├── tests/              # Tests del paquete wildfire (pytest)
+├── .github/workflows/  # Actualización diaria y tests
 └── requirements.txt    # Dependencias
 ```
 

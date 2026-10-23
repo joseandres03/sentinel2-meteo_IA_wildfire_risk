@@ -82,7 +82,10 @@ def composicion_previa(geometria, fecha, dias: int = 30):
     inicio = fin.advance(-dias, "day")
     coleccion = (ee.ImageCollection(S2).filterBounds(geometria).filterDate(inicio, fin)
                  .map(enmascarar_nubes).select(list(BANDAS_S2)))
-    return coleccion.median()
+    # Si no hay ninguna escena, se devuelve una imagen enmascarada con las mismas bandas
+    # (sus variables saldrán vacías) en lugar de una imagen sin bandas que rompería el cálculo.
+    vacia = ee.Image.constant([0] * len(BANDAS_S2)).rename(list(BANDAS_S2)).updateMask(0)
+    return ee.Image(ee.Algorithms.If(coleccion.size().gt(0), coleccion.median(), vacia))
 
 
 def mascara_vegetacion():
@@ -169,10 +172,15 @@ def _caracteristicas_punto(f, dias_s2: int = 30, radio_m: int = 320):
     # Se promedia en 15 km porque las celdas de ERA5-Land (~11 km) pueden no cubrir la costa.
     era = ee.ImageCollection(ERA5)
     entorno_meteo = punto.buffer(15000)
-    dia = era.filterDate(fecha, fecha.advance(1, "day")).select(list(BANDAS_ERA5)).mean()
+    dia_col = era.filterDate(fecha, fecha.advance(1, "day")).select(list(BANDAS_ERA5))
+    dia_vacio = ee.Image.constant([0] * len(BANDAS_ERA5)).rename(list(BANDAS_ERA5)).updateMask(0)
+    dia = ee.Image(ee.Algorithms.If(dia_col.size().gt(0), dia_col.mean(), dia_vacio))
     meteo = dia.reduceRegion(ee.Reducer.mean(), entorno_meteo, 11132, maxPixels=1e8)
-    precip = (era.filterDate(fecha.advance(-30, "day"), fecha).select("total_precipitation_sum").sum()
-              .rename("precip_30d").reduceRegion(ee.Reducer.mean(), entorno_meteo, 11132, maxPixels=1e8))
+    lluvia_col = era.filterDate(fecha.advance(-30, "day"), fecha).select("total_precipitation_sum")
+    lluvia = ee.Image(ee.Algorithms.If(lluvia_col.size().gt(0), lluvia_col.sum(),
+                                       ee.Image.constant(0).updateMask(0)))
+    precip = ee.Image(lluvia).rename("precip_30d").reduceRegion(
+        ee.Reducer.mean(), entorno_meteo, 11132, maxPixels=1e8)
 
     n_escenas = (ee.ImageCollection(S2).filterBounds(entorno)
                  .filterDate(fecha.advance(-dias_s2, "day"), fecha).size())
