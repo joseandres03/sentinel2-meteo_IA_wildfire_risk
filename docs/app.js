@@ -8,19 +8,35 @@ L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/
 }).addTo(map);
 
 const riesgoLayers = [];
-let islaActualSelect = "Tenerife"; // Isla por defecto al abrir
+// Isla por defecto al abrir: Tenerife si está disponible; si no, la primera que exista
+let islaActualSelect = configWeb.islas["Tenerife"] ? "Tenerife" : Object.keys(configWeb.islas)[0];
+
+// Texto informativo de fechas y estado de la isla seleccionada
+function textoInfoIsla(isla) {
+    const meta = configWeb.islas[isla];
+    if (!meta) {
+        return `<strong>Última ejecución:</strong> ${configWeb.fecha_actualizacion}<br>
+            <strong style="color:#b30000">${isla}:</strong> sin datos disponibles en esta ejecución.`;
+    }
+    let html = `<strong>Última ejecución:</strong> ${configWeb.fecha_actualizacion}<br>
+        <strong style="color:#b30000">Imagen satélite (${isla}):</strong> ${meta.fecha_sat}`;
+    if (meta.desactualizado) {
+        html += `<br><span style="color:#b36b00"><strong>⚠ Mapa no actualizado hoy.</strong> Se muestra el del ${meta.actualizado}.</span>`;
+    }
+    return html;
+}
 
 // INYECCIÓN DINÁMICA DE LA LEYENDA AEMET EN HTML
 const legendContainer = document.getElementById('legend-container');
 legendContainer.innerHTML = `
-    <div class="subtitle" style="margin-bottom: 10px; margin-top:0;"><strong>Niveles de peligro de incendio</strong></div>
+    <div class="subtitle" style="margin-bottom: 10px; margin-top:0;"><strong>Índice de susceptibilidad (0–100)</strong><br><span style="font-size:0.85em">Experimental: no es una probabilidad calibrada.</span></div>
     <div class="leyenda-aemet">
-        <div class="leyenda-fila"><div class="color-box c-muy-bajo"></div> 0 - 10% (Muy bajo)</div>
-        <div class="leyenda-fila"><div class="color-box c-bajo"></div> 10 - 20% (Bajo)</div>
-        <div class="leyenda-fila"><div class="color-box c-moderado"></div> 20 - 40% (Moderado)</div>
-        <div class="leyenda-fila"><div class="color-box c-alto"></div> 40 - 50% (Alto)</div>
-        <div class="leyenda-fila"><div class="color-box c-muy-alto"></div> 50 - 60% (Muy alto)</div>
-        <div class="leyenda-fila"><div class="color-box c-extremo"></div> > 60% (Extremo)</div>
+        <div class="leyenda-fila"><div class="color-box c-muy-bajo"></div> 0 – 10 (Muy bajo)</div>
+        <div class="leyenda-fila"><div class="color-box c-bajo"></div> 10 – 20 (Bajo)</div>
+        <div class="leyenda-fila"><div class="color-box c-moderado"></div> 20 – 40 (Moderado)</div>
+        <div class="leyenda-fila"><div class="color-box c-alto"></div> 40 – 50 (Alto)</div>
+        <div class="leyenda-fila"><div class="color-box c-muy-alto"></div> 50 – 60 (Muy alto)</div>
+        <div class="leyenda-fila"><div class="color-box c-extremo"></div> > 60 (Extremo)</div>
         <div class="leyenda-fila" style="margin-top: 10px;"><div class="color-box c-nubes"></div> Nubes (Área sin datos)</div>
     </div>
 `;
@@ -54,14 +70,8 @@ function inicializarTodasLasIslas() {
 document.getElementById('island-select').addEventListener('change', function(e) {
     islaActualSelect = e.target.value;
     const meta = configWeb.islas[islaActualSelect];
-    map.flyToBounds(meta.bounds, { duration: 1.5 });
-    
-    // Actualizar la etiqueta de la fecha del satélite
-    const infoFechaHtml = `
-        <strong>Última ejecución:</strong> ${configWeb.fecha_actualizacion}<br>
-        <strong style="color:#b30000">Imagen Satélite (${islaActualSelect}):</strong> ${meta.fecha_sat}
-    `;
-    document.getElementById('update-date').innerHTML = infoFechaHtml;
+    if (meta) map.flyToBounds(meta.bounds, { duration: 1.5 });
+    document.getElementById('update-date').innerHTML = textoInfoIsla(islaActualSelect);
 });
 
 // El slider modifica la opacidad de TODAS las capas a la vez
@@ -140,7 +150,7 @@ map.on('mousemove', function(e) {
                     ${islaEncontrada}
                 </div>
                 <strong>Riesgo:</strong> <span style="color:${colorNivel}; font-weight:bold;">${nivelTexto}</span> 
-                <span style="font-size:0.85em; color:#555;">(${(r * 100).toFixed(1)}%)</span><br>
+                <span style="font-size:0.85em; color:#555;">(índice ${(r * 100).toFixed(0)}/100)</span><br>
                 <strong>Temperatura:</strong> ${t.toFixed(1)} °C<br>
                 <strong>Humedad:</strong> ${hr.toFixed(1)} %<br>
                 <strong>Viento:</strong> ${v.toFixed(1)} km/h
@@ -159,11 +169,8 @@ map.on('mouseout', function() {
 
 // Arrancar sistema
 inicializarTodasLasIslas();
-map.flyToBounds(configWeb.islas[islaActualSelect].bounds, { duration: 0 });
-
-// Forzar la actualización inicial del texto de las fechas
-const metaInit = configWeb.islas[islaActualSelect];
-document.getElementById('update-date').innerHTML = `
-    <strong>Última ejecución:</strong> ${configWeb.fecha_actualizacion}<br>
-    <strong style="color:#b30000">Imagen satélite (${islaActualSelect}):</strong> ${metaInit.fecha_sat}
-`;
+if (islaActualSelect) {
+    map.flyToBounds(configWeb.islas[islaActualSelect].bounds, { duration: 0 });
+    document.getElementById('island-select').value = islaActualSelect;
+    document.getElementById('update-date').innerHTML = textoInfoIsla(islaActualSelect);
+}

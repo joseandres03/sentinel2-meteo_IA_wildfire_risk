@@ -49,6 +49,14 @@ def seleccionar_isla() -> str:
         isla = input("Isla no válida. Escribe el nombre exacto de la lista: ").strip()
     return isla
 
+def enmascarar_nubes_scl(imagen):
+    """Enmascara los píxeles que la capa SCL de Sentinel-2 clasifica como sin datos (0),
+    defectuosos (1), sombra de nube (3), nube de probabilidad media/alta (8, 9) o cirro (10)."""
+    scl = imagen.select('SCL')
+    despejado = (scl.neq(0).And(scl.neq(1)).And(scl.neq(3))
+                 .And(scl.neq(8)).And(scl.neq(9)).And(scl.neq(10)))
+    return imagen.updateMask(despejado)
+
 def descargar_satelite(isla: str, proyecto_gcp: str = "tfm-bbdd-499813") -> tuple:
     print(f"\nBuscando la última imagen de la constelación Sentinel-2 para {isla}...")
     ee.Initialize(project=proyecto_gcp)
@@ -63,12 +71,23 @@ def descargar_satelite(isla: str, proyecto_gcp: str = "tfm-bbdd-499813") -> tupl
         .filterDate(hace_un_mes.strftime('%Y-%m-%d'), hoy.strftime('%Y-%m-%d'))
     )
     
+    n_imagenes = coleccion.size().getInfo()
+    if n_imagenes == 0:
+        raise RuntimeError(f"no hay imágenes Sentinel-2 de {isla} en los últimos 30 días")
+
     ultima_imagen = coleccion.sort('system:time_start', False).first()
     fecha_captura = ee.Date(ultima_imagen.get('system:time_start')).format('YYYY-MM-dd').getInfo()
-    print(f"-> última imagen obtenida el: {fecha_captura}")
-    
-    imagen_mosaico = coleccion.sort('system:time_start', True).mosaic()
-    imagen_export = imagen_mosaico.select(['B2', 'B3', 'B4', 'B8', 'B11', 'B12'])
+    print(f"-> última imagen obtenida el: {fecha_captura} ({n_imagenes} escenas en 30 días)")
+
+    # Composición "último píxel sin nubes": se enmascaran nubes, sombras y cirros con la
+    # capa SCL de Sentinel-2 y se apilan las escenas de más antigua a más reciente.
+    # Donde ninguna escena está despejada se rellena con el mosaico sin enmascarar
+    # (esas zonas se siguen marcando como nube en el visor).
+    bandas = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12']
+    coleccion_ordenada = coleccion.sort('system:time_start', True)
+    mosaico_despejado = coleccion_ordenada.map(enmascarar_nubes_scl).mosaic()
+    mosaico_bruto = coleccion_ordenada.mosaic()
+    imagen_export = mosaico_despejado.select(bandas).unmask(mosaico_bruto.select(bandas))
     
     ruta_salida = os.path.join(BASE_DIR, 'data', 'raw', f'satelite_{isla.replace(" ", "_")}.tif')
     os.makedirs(os.path.dirname(ruta_salida), exist_ok=True)
@@ -97,6 +116,9 @@ def descargar_meteo_malla(isla: str, coords_utm: list) -> np.ndarray:
         "longitude": ",".join(map(str, np.round(malla_lons.flatten(), 4))),
         "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
         "models": "best_match",
+        # El modelo se entrenó con 'velmedia' de AEMET, que está en m/s.
+        # Open-Meteo devuelve km/h por defecto, así que se pide explícitamente en m/s.
+        "wind_speed_unit": "ms",
         "timezone": "Atlantic/Canary",
         "forecast_days": 1
     }
@@ -323,73 +345,148 @@ def exportar_visor_interactivo(ruta_tif_riesgo: str, ruta_tif_temp: str, ruta_ti
     return [[lat_min, lon_min], [lat_max, lon_max]]
 
 
+# GESTIÓN DEL ESTADO DEL VISOR (tolerancia a fallos)
+
+def leer_config_previa(ruta_config: str) -> dict:
+    """Lee el config.js de la ejecución anterior para poder conservar las islas que fallen hoy."""
+    if not os.path.exists(ruta_config):
+        return {"islas": {}}
+    try:
+        with open(ruta_config, 'r', encoding='utf-8') as f:
+            texto = f.read().strip()
+        texto = texto.replace("const configWeb =", "", 1).strip().rstrip(";")
+        config = json.loads(texto)
+        config.setdefault("islas", {})
+        return config
+    except Exception as e:
+        print(f"⚠️ aviso: no se pudo leer el config.js anterior ({e}); se parte de cero.")
+        return {"islas": {}}
+
+def procesar_isla(isla: str, dir_docs: str) -> dict:
+    """Ejecuta el flujo completo para una isla y devuelve sus metadatos para el visor."""
+    tiempos = {}
+    t0 = time.perf_counter()
+    ruta_raw, fecha_satelite = descargar_satelite(isla)
+    tiempos["descarga_satelite_s"] = round(time.perf_counter() - t0, 1)
+
+    t0 = time.perf_counter()
+    img_bruta, m_tierra, m_vegetacion, perfil = calcular_mascaras_fisicas(ruta_raw)
+    tensores, coords, coords_utm, dim_base = extraer_parches_solapados(img_bruta, m_vegetacion, perfil, tamano=64, solape=8)
+    del img_bruta
+    tiempos["preprocesado_s"] = round(time.perf_counter() - t0, 1)
+
+    if len(tensores) == 0:
+        raise RuntimeError(f"no se detectó biomasa forestal procesable en {isla}")
+
+    t0 = time.perf_counter()
+    meteo_matriz = descargar_meteo_malla(isla, coords_utm)
+    tiempos["descarga_meteo_s"] = round(time.perf_counter() - t0, 1)
+
+    t0 = time.perf_counter()
+    riesgos = predecir_riesgo(tensores, meteo_matriz)
+    n_parches = int(len(tensores))
+    del tensores
+    tiempos["inferencia_s"] = round(time.perf_counter() - t0, 1)
+
+    # Desglosamos todas las variables para exportarlas
+    temperaturas = meteo_matriz[:, 0]
+    humedades = meteo_matriz[:, 1]
+    vientos = meteo_matriz[:, 2] * 3.6  # m/s -> km/h para el visor
+
+    nombre = isla.replace(" ", "_")
+    ruta_export_tif = os.path.join(dir_docs, f'riesgo_{nombre}.tif')
+    ruta_export_temp = os.path.join(dir_docs, f'temp_{nombre}.tif')
+    ruta_export_hr = os.path.join(dir_docs, f'hr_{nombre}.tif')
+    ruta_export_v = os.path.join(dir_docs, f'viento_{nombre}.tif')
+
+    t0 = time.perf_counter()
+    print("consolidando matrices cartográficas...")
+    reconstruir_mapa_calor(riesgos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_tif)
+    reconstruir_mapa_calor(temperaturas, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_temp)
+    reconstruir_mapa_calor(humedades, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_hr)
+    reconstruir_mapa_calor(vientos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_v)
+
+    bounds_isla = exportar_visor_interactivo(ruta_export_tif, ruta_export_temp, ruta_export_hr, ruta_export_v, ruta_raw, isla, dir_docs)
+    tiempos["exportacion_s"] = round(time.perf_counter() - t0, 1)
+
+    print(f"\n✅ {isla} completada con éxito. riesgo máximo detectado: {np.max(riesgos)*100:.1f}%")
+    return {
+        "bounds": bounds_isla,
+        "fecha_sat": fecha_satelite,
+        "n_parches": n_parches,
+        "riesgo_max": round(float(np.max(riesgos)), 4),
+        "tiempos": tiempos,
+    }
+
+
 # BLOQUE PRINCIPAL DE EJECUCIÓN
 
 if __name__ == "__main__":
     print("🚀 iniciando automatización masiva predictiva...")
-    
+    inicio_total = time.perf_counter()
+    zona = ZoneInfo("Atlantic/Canary")
+    hoy = datetime.now(zona).strftime("%Y-%m-%d %H:%M")
+
     dir_docs = os.path.join(BASE_DIR, 'docs')
     os.makedirs(dir_docs, exist_ok=True)
-    
-    config_docs = {
-        "islas": {}
-    }
-    
-    for isla in BBOX_CANARIAS.keys():
-        try:
-            print(f"\n{'='*50}\n🛰️ PROCESANDO: {isla}\n{'='*50}")
-            ruta_raw, fecha_satelite = descargar_satelite(isla)
-            
-            img_bruta, m_tierra, m_vegetacion, perfil = calcular_mascaras_fisicas(ruta_raw)
-            tensores, coords, coords_utm, dim_base = extraer_parches_solapados(img_bruta, m_vegetacion, perfil, tamano=64, solape=8)
-            
-            if len(tensores) > 0:
-                meteo_matriz = descargar_meteo_malla(isla, coords_utm)
-                riesgos = predecir_riesgo(tensores, meteo_matriz)
-                
-                # Desglosamos todas las variables para exportarlas
-                temperaturas = meteo_matriz[:, 0]
-                humedades = meteo_matriz[:, 1]
-                vientos = meteo_matriz[:, 2]
-                
-                ruta_export_tif = os.path.join(dir_docs, f'riesgo_{isla.replace(" ", "_")}.tif')
-                ruta_export_temp = os.path.join(dir_docs, f'temp_{isla.replace(" ", "_")}.tif')
-                ruta_export_hr = os.path.join(dir_docs, f'hr_{isla.replace(" ", "_")}.tif')
-                ruta_export_v = os.path.join(dir_docs, f'viento_{isla.replace(" ", "_")}.tif')
-                
-                print("consolidando matrices cartográficas...")
-                reconstruir_mapa_calor(riesgos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_tif)
-                reconstruir_mapa_calor(temperaturas, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_temp)
-                reconstruir_mapa_calor(humedades, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_hr)
-                reconstruir_mapa_calor(vientos, coords, dim_base, m_tierra, m_vegetacion, perfil, ruta_export_v)
-                
-                bounds_isla = exportar_visor_interactivo(ruta_export_tif, ruta_export_temp, ruta_export_hr, ruta_export_v, ruta_raw, isla, dir_docs)
-                
-                # Guardamos los metadatos específicos de la isla
-                config_docs["islas"][isla] = {
-                    "bounds": bounds_isla,
-                    "fecha_sat": fecha_satelite
-                }
-                
-                print(f"\n✅ {isla} completada con éxito. riesgo máximo detectado: {np.max(riesgos)*100:.1f}%")
-            else:
-                print(f"\n⚠️ operación omitida: no se detectó biomasa forestal procesable en {isla}.")
-                
-        except Exception as e:
-            print(f"\n[ERROR CRÍTICO] caída del pipeline durante el procesado de {isla}: {e}")
-            
-        finally:
-            if 'img_bruta' in locals(): del img_bruta
-            if 'tensores' in locals(): del tensores
-            if 'riesgos' in locals(): del riesgos
-            if 'meteo_matriz' in locals(): del meteo_matriz
-            if 'm_tierra' in locals(): del m_tierra
-            if 'm_vegetacion' in locals(): del m_vegetacion
-            gc.collect()
-            keras.backend.clear_session()
-            
-    config_docs["fecha_actualizacion"] = datetime.now(ZoneInfo("Atlantic/Canary")).strftime("%Y-%m-%d %H:%M")
-            
     ruta_config = os.path.join(dir_docs, 'config.js')
+    config_previa = leer_config_previa(ruta_config)
+
+    config_docs = {"islas": {}}
+    estado = {"fecha_ejecucion": hoy, "islas": {}}
+    MAX_INTENTOS = 2
+
+    for isla in BBOX_CANARIAS.keys():
+        print(f"\n{'='*50}\n🛰️ PROCESANDO: {isla}\n{'='*50}")
+        t_isla = time.perf_counter()
+        errores = []
+
+        for intento in range(1, MAX_INTENTOS + 1):
+            try:
+                meta = procesar_isla(isla, dir_docs)
+                meta["actualizado"] = hoy
+                config_docs["islas"][isla] = meta
+                break
+            except Exception as e:
+                errores.append(f"intento {intento}: {type(e).__name__}: {e}")
+                print(f"\n[ERROR] fallo procesando {isla} (intento {intento}/{MAX_INTENTOS}): {e}")
+                if intento < MAX_INTENTOS:
+                    time.sleep(20)
+            finally:
+                gc.collect()
+                keras.backend.clear_session()
+
+        if isla in config_docs["islas"]:
+            estado["islas"][isla] = {"estado": "ok", "duracion_s": round(time.perf_counter() - t_isla, 1),
+                                     "errores": errores, **config_docs["islas"][isla]}
+        elif isla in config_previa["islas"]:
+            # Se conserva el último mapa válido de la isla y se marca como desactualizado
+            meta_previa = dict(config_previa["islas"][isla])
+            meta_previa["desactualizado"] = True
+            meta_previa.setdefault("actualizado", config_previa.get("fecha_actualizacion", "desconocida"))
+            config_docs["islas"][isla] = meta_previa
+            estado["islas"][isla] = {"estado": "desactualizado", "duracion_s": round(time.perf_counter() - t_isla, 1),
+                                     "errores": errores, "mapa_conservado_de": meta_previa["actualizado"]}
+            print(f"⚠️ {isla}: se conserva el mapa del {meta_previa['actualizado']}.")
+        else:
+            estado["islas"][isla] = {"estado": "sin_datos", "duracion_s": round(time.perf_counter() - t_isla, 1),
+                                     "errores": errores}
+
+    config_docs["fecha_actualizacion"] = hoy
+    estado["duracion_total_s"] = round(time.perf_counter() - inicio_total, 1)
+    estado["islas_ok"] = sum(1 for v in estado["islas"].values() if v["estado"] == "ok")
+    estado["islas_desactualizadas"] = sum(1 for v in estado["islas"].values() if v["estado"] == "desactualizado")
+
+    if not config_docs["islas"]:
+        # Sin ninguna isla disponible no se sobrescribe el visor para no romper la web
+        raise SystemExit("❌ ninguna isla disponible: no se actualiza el visor.")
+
     with open(ruta_config, 'w', encoding='utf-8') as f:
-        f.write(f"const configWeb = {json.dumps(config_docs, indent=4)};\n")
+        f.write(f"const configWeb = {json.dumps(config_docs, indent=4, ensure_ascii=False)};\n")
+
+    with open(os.path.join(dir_docs, 'estado_pipeline.json'), 'w', encoding='utf-8') as f:
+        json.dump(estado, f, indent=2, ensure_ascii=False)
+
+    print(f"\n📋 resumen: {estado['islas_ok']} islas actualizadas, "
+          f"{estado['islas_desactualizadas']} conservadas del día anterior, "
+          f"{estado['duracion_total_s']} s en total.")
