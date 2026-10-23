@@ -13,3 +13,5 @@ rasterio
 tensorflow
 scikit-learn
 joblib
+xgboost
+pytest
