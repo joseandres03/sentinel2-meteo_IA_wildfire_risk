@@ -121,8 +121,35 @@ def focos_firms(inicio: str, fin: str, confianza_min: int = 50, region=None):
     return coleccion.map(a_puntos).flatten()
 
 
+def mascara_tierra():
+    """Imagen binaria (1 = tierra firme, cualquier cobertura salvo agua según ESA WorldCover)."""
+    wc = ee.ImageCollection(WORLDCOVER).first().select("Map")
+    return wc.neq(80).rename("tierra")
+
+
+def puntos_tierra(n: int, semilla: int = 42, escala: int = 100, region=None):
+    """Muestra aleatoria de ``n`` puntos sobre tierra firme, con cualquier cobertura.
+
+    Se usa para generar los negativos con el **mismo criterio espacial que los incendios**:
+    los focos FIRMS pueden caer en cualquier cobertura (también cerca de pueblos o cultivos),
+    así que los negativos también. Después se aplica a ambas clases el mismo filtro de
+    vegetación sobre su entorno. Si los negativos se tomaran solo de píxeles con vegetación,
+    el modelo aprendería a distinguir "zona con o sin vegetación/urbana" en vez de riesgo.
+    """
+    _requiere_ee()
+    region = region or region_canarias()
+    muestra = mascara_tierra().selfMask().sample(
+        region=region, scale=escala, numPixels=n, seed=semilla, geometries=True,
+    )
+    return muestra.map(_con_coordenadas)
+
+
 def puntos_vegetacion(n: int, semilla: int = 42, escala: int = 100, region=None):
-    """Muestra aleatoria de ``n`` puntos sobre vegetación (para generar negativos)."""
+    """Muestra aleatoria de ``n`` puntos sobre vegetación.
+
+    No usar para los negativos del dataset: introduce un sesgo frente a los focos FIRMS
+    (ver ``puntos_tierra``).
+    """
     _requiere_ee()
     region = region or region_canarias()
     muestra = mascara_vegetacion().selfMask().sample(
@@ -202,8 +229,11 @@ def dataframe_a_fc(df: pd.DataFrame):
 
 
 def exportar_caracteristicas(df: pd.DataFrame, carpeta_drive: str, prefijo: str = "caracteristicas",
-                             tam_lote: int = 2000, dias_s2: int = 30) -> list:
+                             tam_lote: int = 2000, dias_s2: int = 30, radio_m: int = 500) -> list:
     """Lanza tareas de exportación a Google Drive (CSV) con las variables tabulares por lotes.
+
+    ``radio_m`` es el radio del entorno de cada punto. Por defecto 500 m, del orden de la
+    incertidumbre de posición de un foco MODIS (píxel de 1 km).
 
     El cálculo se hace en los servidores de Earth Engine; se sigue en
     https://code.earthengine.google.com/tasks o con ``[t.status() for t in tareas]``.
@@ -212,7 +242,7 @@ def exportar_caracteristicas(df: pd.DataFrame, carpeta_drive: str, prefijo: str 
     tareas = []
     for i, inicio in enumerate(range(0, len(df), tam_lote)):
         lote = df.iloc[inicio:inicio + tam_lote]
-        fc = dataframe_a_fc(lote).map(lambda f: _caracteristicas_punto(f, dias_s2))
+        fc = dataframe_a_fc(lote).map(lambda f: _caracteristicas_punto(f, dias_s2, radio_m))
         tarea = ee.batch.Export.table.toDrive(
             collection=fc, description=f"{prefijo}_{i:03d}", folder=carpeta_drive,
             fileNamePrefix=f"{prefijo}_{i:03d}", fileFormat="CSV",
