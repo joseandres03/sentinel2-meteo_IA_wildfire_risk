@@ -6,9 +6,9 @@
 ![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-2088FF.svg)
 ![Leaflet](https://img.shields.io/badge/Frontend-Leaflet-199900.svg?logo=leaflet)
 
-> **Prototipo *end-to-end* de susceptibilidad a incendios forestales en Canarias**: ingesta de imágenes Sentinel-2 y datos meteorológicos, red neuronal multimodal (*late fusion*) y visor cartográfico actualizado a diario con GitHub Actions.
+> **Sistema *end-to-end* de susceptibilidad a incendios forestales en Canarias**: ingesta de imágenes Sentinel-2 y datos meteorológicos de AEMET, red neuronal multimodal (*late fusion*) y visor cartográfico que se actualiza cada día con GitHub Actions.
 
-Trabajo de Fin de Máster — Máster en Big Data, Data Science e Inteligencia Artificial (Universidad Complutense de Madrid).
+Proyecto personal en desarrollo activo. La versión 1 está en producción, y la versión 2 aprende de incendios observados y se valida con datos que el modelo no ha visto (ver [Hoja de ruta](#-hoja-de-ruta)).
 
 ## 🌍 Visor
 
@@ -16,16 +16,16 @@ El pipeline se ejecuta automáticamente cada día y publica el mapa en:
 
 👉 **https://canarywildfirerisk.es/**
 
-> ⚠️ El mapa es un **índice de susceptibilidad experimental**, no una alerta oficial. Consulta la sección [Validación y limitaciones](#-validación-y-limitaciones).
+> ⚠️ El mapa muestra un **índice de susceptibilidad experimental**, no una alerta oficial. Ver [Limitaciones de la versión 1](#-limitaciones-de-la-versión-1).
 
 ---
 
-## 📖 Descripción
+## 📖 Versión 1 (en producción)
 
-El proyecto combina dos fuentes de información para estimar, en cada zona con vegetación del archipiélago, un índice de riesgo entre 0 y 1:
+El modelo combina dos fuentes de información para estimar, en cada zona con vegetación del archipiélago, un índice de riesgo entre 0 y 1:
 
-1. **Estado del combustible (Sentinel-2):** parches de 64×64 píxeles (640×640 m) con 6 bandas (B2, B3, B4, B8, B11, B12). Se enmascaran el agua (NDWI) y las zonas sin vegetación (NDVI) y se estima el estrés hídrico de la vegetación (NDMI).
-2. **Condiciones meteorológicas:** temperatura máxima, humedad relativa media y velocidad del viento. En el entrenamiento proceden de 58 estaciones de AEMET (2017–2026); en producción, del pronóstico de Open-Meteo, interpolado sobre el territorio.
+1. **Estado del combustible (Sentinel-2):** parches de 64×64 píxeles (640×640 m) con 6 bandas (B2, B3, B4, B8, B11, B12). Se enmascaran el agua (NDWI) y las zonas sin vegetación (NDVI), y se estima el estrés hídrico de la vegetación (NDMI).
+2. **Condiciones meteorológicas:** temperatura máxima, humedad relativa media y velocidad del viento. En el entrenamiento proceden de estaciones de AEMET (2017–2026); en producción, del pronóstico HARMONIE-AROME (vía Open-Meteo), interpolado sobre el territorio.
 
 ### 🧠 Modelo (*late fusion*)
 
@@ -35,85 +35,70 @@ El proyecto combina dos fuentes de información para estimar, en cada zona con v
 
 **Variable objetivo.** El índice que aprende la red se construye en el `Cuaderno2` como `0,35 × riesgo meteorológico + 0,65 × riesgo de combustible`. El riesgo meteorológico se calcula con umbrales de temperatura, humedad y viento, y el de combustible con el NDMI medio de la vegetación válida del parche.
 
----
-
-## ⚙️ Pipeline diario (GitHub Actions)
+### ⚙️ Pipeline diario (GitHub Actions)
 
 El workflow [`.github/workflows/actualizar.yml`](.github/workflows/actualizar.yml) se ejecuta cada día y:
 
 1. Prepara un servidor Ubuntu con las dependencias.
-2. Descarga el mosaico Sentinel-2 más reciente (Google Earth Engine) y el pronóstico meteorológico a 24 h (Open-Meteo).
+2. Compone la imagen Sentinel-2 más reciente sin nubes (máscara SCL, Google Earth Engine) y descarga el pronóstico meteorológico a 24 h.
 3. Carga el escalador (`models/robust_scaler_meteo.pkl`) y el modelo (`models/modelo_late_fusion_definitivo.keras`).
 4. Ejecuta la inferencia con ventana deslizante (solape de 8 px) sobre las zonas con vegetación.
 5. Reproyecta con Rasterio, exporta las capas y actualiza el visor estático (HTML, CSS y Leaflet.js) en `docs/`.
+6. Registra el estado de cada isla, los tiempos y los errores en `docs/estado_pipeline.json`. Si una isla falla, se reintenta y, si no se recupera, se conserva su último mapa marcado como desactualizado.
+
+### 🔬 Limitaciones de la versión 1
+
+**La versión 1 es un prototipo de susceptibilidad, no un sistema de alerta validado.** Estas limitaciones motivan la versión 2:
+
+| Limitación | Detalle |
+|---|---|
+| La variable objetivo no procede de incendios observados | La red aprende a aproximar un índice calculado con fórmulas a partir de sus propias entradas. El MAE de 0,0228 en test mide lo bien que reproduce ese índice, **no su capacidad de anticipar incendios reales**. |
+| Posible fuga espacial y temporal | La partición aleatoria 80/20 pone las mismas estaciones (mismo parche de 640 m) en entrenamiento y en test. |
+| Sin contraste con incendios posteriores | No se ha comparado el mapa con incendios ocurridos después del entrenamiento. |
+| Métricas y calibración | Faltan sensibilidad, precisión, falsos positivos en zonas de riesgo alto y calibración de probabilidades. |
+| Cobertura de estaciones | El catálogo original perdía 20 estaciones (AEMET escribe la provincia de Santa Cruz de Tenerife de dos formas): Tenerife quedaba con 2 estaciones y ninguna por encima de 900 m. *Corregido en el catálogo completo.* |
+| Cambio de dominio | Se entrena con parches centrados en estaciones y datos observados, y se predice sobre todo el territorio con pronósticos. |
 
 ---
 
-## 🔬 Validación y limitaciones
+## 🧭 Hoja de ruta
 
-El trabajo se presentó como TFM y el tribunal señaló puntos de mejora que se recogen aquí con transparencia. **El estado actual corresponde a un prototipo de susceptibilidad, no a un sistema de alerta validado.**
+**Hecho**
+- [x] Composición Sentinel-2 sin nubes (máscara SCL) en producción.
+- [x] Corrección de unidades del viento: el modelo se entrenó con m/s (AEMET) y el pronóstico llegaba en km/h.
+- [x] Pipeline tolerante a fallos y con registro de ejecución (`estado_pipeline.json`).
+- [x] Catálogo completo de estaciones de AEMET en Canarias (77; antes 58). Incorpora Izaña (2.369 m), Las Cañadas del Teide (2.150 m) y el Roque de los Muchachos (2.223 m).
+- [x] Descarga de la meteorología diaria completa de todas las estaciones (`Cuaderno1`, apartado 5b).
 
-| Limitación | Detalle | Mejora prevista |
-|---|---|---|
-| La variable objetivo no procede de incendios observados | La red aprende a aproximar un índice calculado con fórmulas a partir de sus propias entradas (meteorología y bandas B8/B11). El MAE de 0,0228 en test mide lo bien que reproduce ese índice, **no su capacidad de anticipar incendios reales**. | Entrenar con incendios históricos observados como etiqueta (v2). |
-| Posible fuga espacial y temporal | La partición aleatoria 80/20 pone las mismas estaciones (mismo parche de 640 m) en entrenamiento y test. | Validación por bloques espaciales (islas o zonas) y separación temporal (entrenar con años anteriores y evaluar con años posteriores). |
-| Sin contraste externo | No se ha comparado el mapa con incendios ocurridos después del entrenamiento. | Evaluar con los incendios de las campañas más recientes. |
-| Métricas y calibración | Faltan sensibilidad, precisión, falsos positivos en zonas de riesgo alto y calibración de probabilidades. | Curvas ROC/PR, diagrama de fiabilidad y métricas por umbral de riesgo. |
-| Cambio de dominio | Se entrena con parches centrados en estaciones de AEMET y datos observados, y se predice sobre todo el territorio forestal con pronósticos. | Muestrear puntos en todo el territorio con vegetación. |
-| Nubes | La extracción de entrenamiento no aplica máscara de nubes. | Máscara SCL en producción (aplicada) y en el dataset v2. |
-| Robustez del pipeline | Cuando fallaba una isla, desaparecía del visor y no quedaba registro. | Reintentos, conservación del último mapa y `estado_pipeline.json` (aplicado). |
+**En curso**
+- [ ] **Meteorología en cualquier punto teniendo en cuenta el relieve.** En Canarias la altitud y la inversión térmica de los alisios cambian mucho la temperatura y la humedad en pocos kilómetros. Se compararán varios métodos (estación más cercana, corrección por gradiente vertical, estación más parecida e interpolación con corrección de altitud), midiendo su error al estimar estaciones que se dejan fuera.
+- [ ] **Incendios observados como variable objetivo:** focos térmicos de FIRMS (MODIS 1 km y VIIRS 375 m) agrupados en eventos.
 
-Referencia de comparación recomendada por el tribunal: [mesogeos](https://github.com/paulinebecker2002/mesogeos).
+**Pendiente**
+- [ ] Reentrenar la red *late fusion* como clasificador (incendio sí/no), con validación por bloques espaciales y prueba con años posteriores.
+- [ ] Comparar con modelos de referencia (índice de la v1, Random Forest, XGBoost) y calibrar las probabilidades.
+- [ ] Detección y seguimiento de incendios activos en el visor.
 
----
+Los cuadernos `Cuaderno4` y `Cuaderno5` contienen una **exploración paralela** de la versión 2 con variables tabulares (Sentinel-2, ERA5-Land, relieve y cobertura del suelo) y modelos clásicos. Usan el paquete [`src/wildfire`](src/wildfire), cubierto por tests (`pytest tests`) que se ejecutan en GitHub Actions.
 
-## 🧪 Versión 2: entrenamiento y validación con incendios reales (en desarrollo)
-
-La v2 responde a las limitaciones anteriores cambiando **qué aprende el modelo**: en lugar de imitar un índice construido con fórmulas, aprende de **incendios observados**.
-
-| | v1 (TFM) | v2 |
-|---|---|---|
-| Etiqueta | Índice 0,35·meteo + 0,65·NDMI | 1 = empezó un incendio ese día en ese punto (focos FIRMS agrupados en eventos), 0 = sin incendio cerca |
-| Sentinel-2 | Imagen del mismo día, sin máscara de nubes | Mediana sin nubes (SCL) de los 30 días **previos** |
-| Meteorología | 58 estaciones AEMET | ERA5-Land diario en cualquier punto |
-| Ubicaciones | Alrededor de las estaciones | Todo el territorio con vegetación (ESA WorldCover) |
-| Validación | Partición aleatoria 80/20 | Bloques espaciales de 10 km, isla fuera y prueba con años posteriores (2024+) |
-| Métricas | MAE | ROC-AUC, PR-AUC, sensibilidad, falsos positivos, captura en el 10 % de mayor riesgo, fiabilidad (calibración) |
-| Modelos | CNN late fusion | Índice v1 como referencia, regresión logística, Random Forest, XGBoost; CNN opcional |
-
-**Cómo ejecutarla (Google Colab):**
-
-1. `notebooks/Cuaderno4_dataset_incendios_reales.ipynb`: descarga los focos FIRMS, genera eventos y negativos, y calcula las variables en Earth Engine. Produce `dataset_v2.csv`.
-2. `notebooks/Cuaderno5_modelado_validacion.ipynb`: compara modelos con validación espacial, evalúa con incendios de 2024 en adelante, calibra y guarda el modelo y las métricas.
-
-La lógica reutilizable está en el paquete [`src/wildfire`](src/wildfire), cubierto por tests (`pytest tests`) que se ejecutan en GitHub Actions.
-
-**Estado:** el código de la v2 está implementado y probado con datos sintéticos. Falta ejecutarlo con los datos reales y, si los resultados lo justifican, sustituir el modelo de producción.
-
-### Mejoras ya aplicadas al pipeline de producción
-
-- **Nubes:** composición del último píxel despejado según la capa SCL de Sentinel-2.
-- **Unidades:** el viento de Open-Meteo se pide en m/s, que es la unidad con la que se entrenó el modelo (AEMET). Antes llegaba en km/h.
-- **Tolerancia a fallos:** cada isla se reintenta. Si falla, se conserva su último mapa marcado como desactualizado, en lugar de desaparecer del visor.
-- **Trazabilidad:** `docs/estado_pipeline.json` registra en cada ejecución el estado de cada isla, los tiempos por etapa y los errores.
+Proyecto de referencia para comparar enfoques: [mesogeos](https://github.com/paulinebecker2002/mesogeos), predicción del peligro de incendio en el Mediterráneo con datos geoespaciales y modelos temporales.
 
 ---
 
 ## 📂 Estructura del repositorio
 
 ```text
-├── docs/               # Visor web (HTML, CSS, JS) y capas publicadas
-├── models/             # Modelo (.keras) y escalador meteorológico (.pkl)
+├── docs/               # Visor web (HTML, CSS, JS), capas publicadas y estado del pipeline
+├── models/             # Modelo (.keras) y escalador meteorológico (.pkl) de la versión 1
 ├── notebooks/
-│   ├── Cuaderno1.ipynb # v1 · Ingesta histórica de AEMET y Sentinel-2 (dataset bruto)
+│   ├── Cuaderno1.ipynb # Catálogo de estaciones AEMET, meteorología diaria y parches Sentinel-2
 │   ├── Cuaderno2.ipynb # v1 · Limpieza, imputación KNN, índices espectrales y variable objetivo
 │   ├── Cuaderno3.ipynb # v1 · Entrenamiento y evaluación del modelo late fusion
-│   ├── Cuaderno4_dataset_incendios_reales.ipynb  # v2 · Dataset etiquetado con incendios FIRMS
-│   └── Cuaderno5_modelado_validacion.ipynb       # v2 · Modelos, validación espacial/temporal y calibración
-├── pdf/                # Memoria del TFM
+│   ├── Cuaderno4_dataset_incendios_reales.ipynb  # Exploración v2 · Dataset etiquetado con incendios FIRMS
+│   └── Cuaderno5_modelado_validacion.ipynb       # Exploración v2 · Modelos, validación espacial/temporal y calibración
 ├── src/
 │   ├── pipeline.py     # Pipeline de producción ejecutado por GitHub Actions
-│   └── wildfire/       # Paquete v2: índices, etiquetas, validación, ERA5 y Earth Engine
+│   └── wildfire/       # Paquete: índices, etiquetas, validación, meteorología y Earth Engine
 ├── tests/              # Tests del paquete wildfire (pytest)
 ├── .github/workflows/  # Actualización diaria y tests
 └── requirements.txt    # Dependencias
