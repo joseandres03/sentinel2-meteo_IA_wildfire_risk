@@ -71,7 +71,12 @@ El workflow [`.github/workflows/actualizar.yml`](.github/workflows/actualizar.ym
 - [x] Descarga de la meteorología diaria completa de todas las estaciones (`Cuaderno1`, apartado 5b).
 
 **En curso**
-- [ ] **Meteorología en cualquier punto teniendo en cuenta el relieve.** En Canarias la altitud y la inversión térmica de los alisios cambian mucho la temperatura y la humedad en pocos kilómetros. Se compararán varios métodos (estación más cercana, corrección por gradiente vertical, estación más parecida e interpolación con corrección de altitud), midiendo su error al estimar estaciones que se dejan fuera.
+- [ ] **Meteorología en cualquier punto teniendo en cuenta el relieve** (`Cuaderno4_meteorologia_relieve`). En Canarias la altitud y la inversión térmica de los alisios cambian mucho la temperatura y la humedad en pocos kilómetros. Se comparan cuatro métodos midiendo su error al estimar cada estación con las demás de su isla:
+  - copiar la estación más cercana,
+  - corregirla con el gradiente estándar (−6,5 °C/km),
+  - ajustar cada día el perfil vertical de la isla, con un codo en la altura de la inversión cuando los datos lo justifican,
+  - ese mismo perfil corregido con las estaciones vecinas.
+  - Siguiente mejora prevista: fijar la altura de la inversión con el radiosondeo diario de Güímar.
 - [ ] **Incendios observados como variable objetivo:** focos térmicos de FIRMS (MODIS 1 km y VIIRS 375 m) agrupados en eventos.
 
 **Pendiente**
@@ -79,7 +84,7 @@ El workflow [`.github/workflows/actualizar.yml`](.github/workflows/actualizar.ym
 - [ ] Comparar con modelos de referencia (índice de la v1, Random Forest, XGBoost) y calibrar las probabilidades.
 - [ ] Detección y seguimiento de incendios activos en el visor.
 
-Los cuadernos `Cuaderno4` y `Cuaderno5` contienen una **exploración paralela** de la versión 2 con variables tabulares (Sentinel-2, ERA5-Land, relieve y cobertura del suelo) y modelos clásicos. Usan el paquete [`src/wildfire`](src/wildfire), cubierto por tests (`pytest tests`) que se ejecutan en GitHub Actions.
+Las funciones reutilizables están en el paquete [`src/wildfire`](src/wildfire), cubierto por tests (`pytest tests`) que se ejecutan en GitHub Actions.
 
 Proyecto de referencia para comparar enfoques: [mesogeos](https://github.com/paulinebecker2002/mesogeos), predicción del peligro de incendio en el Mediterráneo con datos geoespaciales y modelos temporales.
 
@@ -94,11 +99,10 @@ Proyecto de referencia para comparar enfoques: [mesogeos](https://github.com/pau
 │   ├── Cuaderno1.ipynb # Catálogo de estaciones AEMET, meteorología diaria y parches Sentinel-2
 │   ├── Cuaderno2.ipynb # v1 · Limpieza, imputación KNN, índices espectrales y variable objetivo
 │   ├── Cuaderno3.ipynb # v1 · Entrenamiento y evaluación del modelo late fusion
-│   ├── Cuaderno4_dataset_incendios_reales.ipynb  # Exploración v2 · Dataset etiquetado con incendios FIRMS
-│   └── Cuaderno5_modelado_validacion.ipynb       # Exploración v2 · Modelos, validación espacial/temporal y calibración
+│   └── Cuaderno4_meteorologia_relieve.ipynb  # Meteorología en cualquier punto: perfil vertical, inversión y validación
 ├── src/
 │   ├── pipeline.py     # Pipeline de producción ejecutado por GitHub Actions
-│   └── wildfire/       # Paquete: índices, etiquetas, validación, meteorología y Earth Engine
+│   └── wildfire/       # Paquete: índices, etiquetas de incendios, validación y meteorología según el relieve
 ├── tests/              # Tests del paquete wildfire (pytest)
 ├── .github/workflows/  # Actualización diaria y tests
 └── requirements.txt    # Dependencias
