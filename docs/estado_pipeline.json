@@ -1,9 +1,9 @@
 {
-  "fecha_ejecucion": "2026-10-25 03:22",
+  "fecha_ejecucion": "2026-10-26 03:24",
   "islas": {
     "La Gomera": {
       "estado": "ok",
-      "duracion_s": 23.3,
+      "duracion_s": 25.8,
       "errores": [],
       "bounds": [
         [
@@ -17,19 +17,19 @@
       ],
       "fecha_sat": "2026-10-24",
       "n_parches": 1770,
-      "riesgo_max": 0.4733,
+      "riesgo_max": 0.4654,
       "tiempos": {
-        "descarga_satelite_s": 16.5,
-        "preprocesado_s": 0.9,
-        "descarga_meteo_s": 0.3,
-        "inferencia_s": 2.9,
-        "exportacion_s": 2.2
+        "descarga_satelite_s": 21.7,
+        "preprocesado_s": 1.0,
+        "descarga_meteo_s": 0.2,
+        "inferencia_s": 1.0,
+        "exportacion_s": 1.4
       },
-      "actualizado": "2026-10-25 03:22"
+      "actualizado": "2026-10-26 03:24"
     },
     "Tenerife": {
       "estado": "ok",
-      "duracion_s": 136.4,
+      "duracion_s": 122.2,
       "errores": [],
       "bounds": [
         [
@@ -43,19 +43,19 @@
       ],
       "fecha_sat": "2026-10-23",
       "n_parches": 15486,
-      "riesgo_max": 0.5116,
+      "riesgo_max": 0.4994,
       "tiempos": {
         "descarga_satelite_s": 82.2,
-        "preprocesado_s": 3.9,
-        "descarga_meteo_s": 20.8,
-        "inferencia_s": 12.0,
-        "exportacion_s": 17.2
+        "preprocesado_s": 2.8,
+        "descarga_meteo_s": 20.7,
+        "inferencia_s": 4.9,
+        "exportacion_s": 11.2
       },
-      "actualizado": "2026-10-25 03:22"
+      "actualizado": "2026-10-26 03:24"
     },
     "Gran Canaria": {
       "estado": "ok",
-      "duracion_s": 66.2,
+      "duracion_s": 86.4,
       "errores": [],
       "bounds": [
         [
@@ -69,19 +69,19 @@
       ],
       "fecha_sat": "2026-10-23",
       "n_parches": 7240,
-      "riesgo_max": 0.5456,
+      "riesgo_max": 0.5392,
       "tiempos": {
-        "descarga_satelite_s": 48.8,
-        "preprocesado_s": 2.1,
-        "descarga_meteo_s": 0.4,
-        "inferencia_s": 6.6,
-        "exportacion_s": 7.9
+        "descarga_satelite_s": 56.1,
+        "preprocesado_s": 1.6,
+        "descarga_meteo_s": 20.5,
+        "inferencia_s": 2.7,
+        "exportacion_s": 5.2
       },
-      "actualizado": "2026-10-25 03:22"
+      "actualizado": "2026-10-26 03:24"
     },
     "La Palma": {
       "estado": "ok",
-      "duracion_s": 98.9,
+      "duracion_s": 66.8,
       "errores": [],
       "bounds": [
         [
@@ -95,19 +95,19 @@
       ],
       "fecha_sat": "2026-10-24",
       "n_parches": 3986,
-      "riesgo_max": 0.5,
+      "riesgo_max": 0.476,
       "tiempos": {
-        "descarga_satelite_s": 67.5,
+        "descarga_satelite_s": 60.0,
         "preprocesado_s": 1.3,
-        "descarga_meteo_s": 20.8,
-        "inferencia_s": 4.4,
-        "exportacion_s": 4.4
+        "descarga_meteo_s": 0.6,
+        "inferencia_s": 1.6,
+        "exportacion_s": 2.9
       },
-      "actualizado": "2026-10-25 03:22"
+      "actualizado": "2026-10-26 03:24"
     },
     "El Hierro": {
       "estado": "ok",
-      "duracion_s": 80.0,
+      "duracion_s": 35.1,
       "errores": [],
       "bounds": [
         [
@@ -121,19 +121,19 @@
       ],
       "fecha_sat": "2026-10-24",
       "n_parches": 1458,
-      "riesgo_max": 0.4691,
+      "riesgo_max": 0.4356,
       "tiempos": {
-        "descarga_satelite_s": 52.8,
+        "descarga_satelite_s": 31.0,
         "preprocesado_s": 0.9,
-        "descarga_meteo_s": 20.8,
-        "inferencia_s": 2.7,
-        "exportacion_s": 2.4
+        "descarga_meteo_s": 0.5,
+        "inferencia_s": 0.8,
+        "exportacion_s": 1.4
       },
-      "actualizado": "2026-10-25 03:22"
+      "actualizado": "2026-10-26 03:24"
     },
     "Lanzarote": {
       "estado": "ok",
-      "duracion_s": 78.9,
+      "duracion_s": 82.2,
       "errores": [],
       "bounds": [
         [
@@ -147,19 +147,19 @@
       ],
       "fecha_sat": "2026-10-23",
       "n_parches": 4723,
-      "riesgo_max": 0.5155,
+      "riesgo_max": 0.5261,
       "tiempos": {
-        "descarga_satelite_s": 62.8,
-        "preprocesado_s": 1.9,
-        "descarga_meteo_s": 0.3,
-        "inferencia_s": 4.9,
-        "exportacion_s": 8.5
+        "descarga_satelite_s": 72.3,
+        "preprocesado_s": 1.6,
+        "descarga_meteo_s": 0.5,
+        "inferencia_s": 1.8,
+        "exportacion_s": 5.6
       },
-      "actualizado": "2026-10-25 03:22"
+      "actualizado": "2026-10-26 03:24"
     },
     "Fuerteventura": {
       "estado": "ok",
-      "duracion_s": 137.0,
+      "duracion_s": 137.6,
       "errores": [],
       "bounds": [
         [
@@ -173,18 +173,18 @@
       ],
       "fecha_sat": "2026-10-23",
       "n_parches": 13968,
-      "riesgo_max": 0.481,
+      "riesgo_max": 0.5134,
       "tiempos": {
-        "descarga_satelite_s": 102.2,
-        "preprocesado_s": 3.7,
-        "descarga_meteo_s": 0.3,
-        "inferencia_s": 11.4,
-        "exportacion_s": 19.0
+        "descarga_satelite_s": 116.7,
+        "preprocesado_s": 2.8,
+        "descarga_meteo_s": 0.2,
+        "inferencia_s": 4.8,
+        "exportacion_s": 12.7
       },
-      "actualizado": "2026-10-25 03:22"
+      "actualizado": "2026-10-26 03:24"
     }
   },
-  "duracion_total_s": 620.6,
+  "duracion_total_s": 556.2,
   "islas_ok": 7,
   "islas_desactualizadas": 0
 }
