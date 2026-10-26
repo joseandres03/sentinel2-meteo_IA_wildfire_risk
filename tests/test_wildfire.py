@@ -245,42 +245,12 @@ def test_validacion_dejando_una_fuera():
 
 # ---------- radiosondeo e inversión ----------
 
-def _cabecera_igra2(anio, mes, dia, hora, n):
-    # columnas: '#' 1, ID 2-12, año 14-17, mes 19-20, día 22-23, hora 25-26, ..., NUMLEV 33-36
-    return f"#SPM00060018 {anio:4d} {mes:02d} {dia:02d} {hora:02d} 1100 {n:4d} ncdc6310 ncdc6310  283000 -163830"
-
-
-def _nivel_igra2(gph, temp_decimas, hr_decimas):
-    # LVLTYP 1-2, ETIME 4-8, PRESS 10-15, PFLAG 16, GPH 17-21, ZFLAG 22, TEMP 23-27, TFLAG 28, RH 29-33
-    return f"21 {-9999:5d} {-9999:6d} {gph:5d}B{temp_decimas:5d}B{hr_decimas:5d} {-9999:5d} {-9999:5d} {-9999:5d}"
-
-
-def _sondeo_igra2(anio, mes, dia, hora, niveles):
-    return [_cabecera_igra2(anio, mes, dia, hora, len(niveles))] + [_nivel_igra2(*n) for n in niveles]
-
-
-def test_formato_lineas_igra2_columnas():
-    linea = _nivel_igra2(1234, -56, 789)
-    assert linea[16:21] == " 1234" and linea[22:27] == "  -56" and linea[28:33] == "  789"
-    cab = _cabecera_igra2(2023, 7, 15, 12, 5)
-    assert cab[13:17] == "2023" and cab[18:20] == "07" and cab[21:23] == "15" and cab[24:26] == "12"
-
-
-def test_leer_igra2_y_detectar_inversion():
-    # sondeo de mediodía: baja hasta 1.100 m, sube 4 ºC hasta 1.400 m y vuelve a bajar
-    niveles = [(105, 240, 700), (500, 215, 750), (1100, 176, 850), (1250, 196, 300),
-               (1400, 216, 150), (2000, 180, 100), (2500, -9999, 100), (3000, 110, 90)]
-    lineas = (_sondeo_igra2(2023, 7, 15, 0, [(105, 200, 800), (1000, 150, 800)])
-              + _sondeo_igra2(2023, 7, 15, 12, niveles)
-              + _sondeo_igra2(2016, 7, 15, 12, niveles))
-    df = mr.leer_igra2(lineas, anio_min=2017)
-    assert set(df["fecha"].dt.year) == {2023}
-    assert len(df[df["hora"] == 12]) == 7          # el nivel con temperatura ausente se descarta
-    assert np.isclose(df["temp_c"].iloc[0], 20.0)
-    inv = mr.inversiones_diarias(df)
-    assert len(inv) == 1
-    fila = inv.iloc[0]
-    assert fila["z_base"] == 1100 and fila["z_cima"] == 1400 and np.isclose(fila["intensidad"], 4.0)
+def test_inversion_en_sondeo_de_pocos_niveles():
+    # baja hasta 1.100 m, sube 4 ºC hasta 1.400 m y vuelve a bajar
+    z = [105, 500, 1100, 1250, 1400, 2000, 3000]
+    t = [24.0, 21.5, 17.6, 19.6, 21.6, 18.0, 11.0]
+    inv = mr.inversion_de_sondeo(z, t)
+    assert inv["z_base"] == 1100 and inv["z_cima"] == 1400 and np.isclose(inv["intensidad"], 4.0)
 
 
 def test_sondeo_sin_inversion():
@@ -321,7 +291,94 @@ def test_validacion_con_radiosondeo():
                           "lat": 28.3 + 0.01 * k, "lon": -16.5, "tmax": t + 5, "tmed": t,
                           "hrMedia": 60.0, "velmedia": 3.0})
     res = mr.validacion_dejando_una_fuera(pd.DataFrame(filas), inversiones=pd.Series(inv))
-    assert set(res["metodo"]) == set(mr.METODOS)
+    assert set(res["metodo"]) == set(mr.METODOS_BASE + mr.METODOS_SONDEO)
     tabla = mr.resumen_errores(res)
     mae = tabla[(tabla.variable == "tmax") & (tabla.franja == "todas")].set_index("metodo")["MAE"]
     assert mae["perfil_sondeo"] < mae["cercana"]
+
+
+# ---------- radiosondeo de alta resolución (PANGAEA) y forma del perfil ----------
+
+TEXTO_PANGAEA = """/* DATA DESCRIPTION:
+Citation:	Torres, Carlos J (2024): Radiosonde measurements from station Izaña (2024-06)
+*/
+Date/Time	Altitude [m]	PPPP [hPa]	TTT [°C]	TdTdTd [°C]	dd [deg]	ff [m/s]
+2024-06-03T00:00	119	1004	23.0	16.3	190	4
+2024-06-03T00:00	123	1004	22.5	16.9	172	3
+2024-06-03T12:00	120	1004	25.0	15.0	10	5
+2024-06-03T12:00	125	1003	24.9	15.1	12	5
+"""
+
+
+def test_leer_radiosondeo_pangaea():
+    df = mr.leer_radiosondeo_pangaea(TEXTO_PANGAEA)
+    assert len(df) == 4 and list(df["hora"]) == [0, 0, 12, 12]
+    assert df["fecha"].iloc[0] == pd.Timestamp("2024-06-03")
+    assert np.isclose(df["td_c"].iloc[2], 15.0) and np.isclose(df["altura_m"].iloc[1], 123)
+
+
+def _sondeo_alta_resolucion(z_base=900.0, z_cima=1400.0, ruido=0.15, semilla=0):
+    rng = np.random.default_rng(semilla)
+    z = np.arange(119, 4000, 5.0)
+    t = 24 - 0.0065 * z
+    t = t + np.where(z > z_base, 0.0115 * (np.minimum(z, z_cima) - z_base), 0.0)   # sube 2,5 ºC en la inversión
+    td = np.where(z > z_cima, 16 - 0.002 * z - 25, 16 - 0.002 * z)                 # aire muy seco por encima
+    return z, t + rng.normal(0, ruido, len(z)), td
+
+
+def test_inversion_en_sondeo_ruidoso_de_alta_resolucion():
+    z, t, _ = _sondeo_alta_resolucion()
+    zm, tm, _ = mr.remuestrear_sondeo(z, t)
+    inv = mr.inversion_de_sondeo(zm, tm)
+    assert abs(inv["z_base"] - 900) <= 75 and abs(inv["z_cima"] - 1400) <= 75
+    assert abs(inv["intensidad"] - 2.5) < 0.5   # (11,5 - 6,5) ºC/km x 500 m
+
+
+def test_remuestrear_sondeo_promedia_capas():
+    zm, tm, tdm = mr.remuestrear_sondeo([10, 20, 30, 40], [1.0, 3.0, 5.0, 7.0], [0, 0, 0, 0], paso=25, z_max=50)
+    assert np.allclose(zm, [12.5, 37.5]) and np.allclose(tm, [2.0, 6.0]) and np.allclose(tdm, 0)
+
+
+def test_perfiles_de_sondeo_por_dia():
+    filas = []
+    for dia in range(3):
+        z, t, td = _sondeo_alta_resolucion(z_base=800 + 100 * dia, semilla=dia)
+        filas.append(pd.DataFrame({"fecha": pd.Timestamp("2024-07-01") + pd.Timedelta(days=dia),
+                                   "hora": 12, "altura_m": z, "temp_c": t, "td_c": td}))
+    perfiles, inv = mr.perfiles_de_sondeo(pd.concat(filas))
+    assert perfiles["fecha"].nunique() == 3 and len(inv) == 3
+    assert np.all(np.abs(inv["z_base"].to_numpy() - np.array([800, 900, 1000])) <= 75)
+
+
+def test_forma_del_sondeo_recupera_estacion_por_encima_de_la_inversion():
+    zs, ts, _ = _sondeo_alta_resolucion(ruido=0.0)
+    verdad = lambda z: np.interp(z, zs, ts) + 3.0            # superficie 3 ºC más cálida que el globo
+    z_est = np.array([20, 150, 300, 450, 630, 870, 2150])   # Tenerife sin Izaña
+    est = mr.estimar_con_forma_del_sondeo(2370, z_est, verdad(z_est), zs, ts, z_ancla=900)
+    assert abs(est - verdad(2370)) < 0.3
+    perfil = mr.ajustar_perfil(z_est, verdad(z_est))
+    assert abs(est - verdad(2370)) < abs(mr.evaluar_perfil(perfil, 2370) - verdad(2370))
+
+
+def test_validacion_con_forma_del_sondeo():
+    rng = np.random.default_rng(7)
+    alturas = [20, 150, 300, 450, 630, 870, 2150, 2370]
+    filas, perfiles, inv = [], [], {}
+    for j, fecha in enumerate(pd.date_range("2024-07-01", periods=4)):
+        zs, ts, tds = _sondeo_alta_resolucion(z_base=850 + 50 * j, ruido=0.0)
+        zm, tm, tdm = mr.remuestrear_sondeo(zs, ts, tds)
+        perfiles.append(pd.DataFrame({"fecha": fecha, "altura_m": zm, "temp_c": tm, "td_c": tdm}))
+        inv[fecha] = 850 + 50 * j
+        for k, z in enumerate(alturas):
+            t = float(np.interp(z, zs, ts)) + 3.0 + rng.normal(0, 0.2)
+            td = min(float(np.interp(z, zs, tds)), t)
+            filas.append({"indicativo": f"E{k}", "fecha": fecha, "isla": "Tenerife", "altitud": z,
+                          "lat": 28.3 + 0.01 * k, "lon": -16.5, "tmax": t + 5, "tmed": t,
+                          "hrMedia": float(meteo.humedad_relativa(t, td)), "velmedia": 3.0})
+    res = mr.validacion_dejando_una_fuera(pd.DataFrame(filas), inversiones=pd.Series(inv),
+                                          perfiles_sondeo=pd.concat(perfiles))
+    assert set(res["metodo"]) == set(mr.METODOS)
+    altas = res[(res["altitud"] >= 2000) & (res["variable"] == "tmax")]
+    mae = altas.groupby("metodo")["error"].apply(lambda e: e.abs().mean())
+    assert mae["forma_sondeo"] < mae["perfil_dia"] and mae["forma_sondeo"] < mae["cercana"]
+    assert "forma_sondeo" not in set(res.loc[res["variable"] == "velmedia", "metodo"])

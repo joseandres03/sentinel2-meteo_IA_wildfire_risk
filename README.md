@@ -71,12 +71,13 @@ El workflow [`.github/workflows/actualizar.yml`](.github/workflows/actualizar.ym
 - [x] Descarga de la meteorología diaria completa de todas las estaciones (`Cuaderno1_datos`, apartado 5b).
 
 **En curso**
-- [ ] **Meteorología en cualquier punto teniendo en cuenta el relieve** (`Cuaderno2_meteorologia_relieve`). En Canarias la altitud y la inversión térmica de los alisios cambian mucho la temperatura y la humedad en pocos kilómetros. Se comparan seis métodos midiendo su error al estimar cada estación con las demás de su isla:
+- [ ] **Meteorología en cualquier punto teniendo en cuenta el relieve** (`Cuaderno2_meteorologia_relieve`). En Canarias la altitud y la inversión térmica de los alisios cambian mucho la temperatura y la humedad en pocos kilómetros. Se comparan ocho métodos, midiendo su error al estimar cada estación con las demás de su isla:
   - copiar la estación más cercana,
   - corregirla con el gradiente estándar (−6,5 °C/km),
-  - ajustar cada día el perfil vertical de la isla, con un codo en la altura de la inversión cuando los datos lo justifican,
-  - ese mismo perfil corregido con las estaciones vecinas,
-  - y los dos anteriores con el codo fijado en la altura de la inversión **medida** cada día por el radiosondeo de Güímar (archivo IGRA2 de la NOAA). Esto es necesario porque en Tenerife no hay estaciones entre 870 y 2.150 m.
+  - ajustar cada día el perfil vertical de la isla, con un codo en la inversión (fijado por las estaciones o por el radiosondeo),
+  - y combinar la recta de las estaciones por debajo de la inversión con la **forma del perfil medido por el radiosondeo** de Güímar por encima, usando sondeos de alta resolución (~5 m) publicados por AEMET en PANGAEA.
+  
+  **Primer resultado:** por debajo de 1.000 m, el perfil vertical reduce a la mitad el error de temperatura máxima respecto a copiar la estación más cercana (de 3,3 a 1,7 °C) y el de humedad de un 13,5 % a un 8 %. Por encima de 1.000 m, donde casi no hay estaciones, es donde se evalúa el método con la forma del radiosondeo.
 - [ ] **Incendios observados como variable objetivo:** focos térmicos de FIRMS (MODIS 1 km y VIIRS 375 m) agrupados en eventos.
 
 **Pendiente**
