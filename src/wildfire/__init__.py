@@ -1,10 +1,11 @@
 """Utilidades del proyecto de susceptibilidad a incendios forestales en Canarias.
 
 Módulos:
-    indices     -> índices espectrales, máscaras de vegetación e índice heurístico del TFM (v1).
+    indices     -> índices espectrales, máscaras de vegetación e índice heurístico de la versión 1.
     etiquetas   -> agrupación de focos de incendio en eventos y muestreo de negativos.
     validacion  -> particiones espaciales/temporales, métricas de clasificación y calibración.
-    gee         -> extracción de datos en Google Earth Engine (requiere `earthengine-api`).
+    meteo       -> humedad relativa y punto de rocío.
+    meteo_relieve -> meteorología en cualquier punto según el relieve (perfil vertical e inversión).
 """
 
 BANDAS_S2 = ("B2", "B3", "B4", "B8", "B11", "B12")

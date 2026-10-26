@@ -41,7 +41,7 @@ def test_riesgo_combustible_v1_mas_seco_mas_riesgo():
     assert indices.riesgo_combustible_v1(seco) > indices.riesgo_combustible_v1(humedo)
 
 
-def test_indice_v1_reproduce_formula_tfm():
+def test_indice_v1_reproduce_formula():
     rm = indices.riesgo_meteorologico_v1(40, 20, 50)   # todo al máximo
     assert np.isclose(rm, 1.0)
     assert np.isclose(indices.indice_v1(1.0, 1.0), 1.0)
@@ -179,12 +179,149 @@ def test_humedad_relativa_saturacion():
     assert 27 < meteo.humedad_relativa(30, 10) < 31  # ≈ 28,9 %
 
 
-def test_derivar_meteo_era5():
-    df = pd.DataFrame({
-        "temperature_2m_max": [303.15], "temperature_2m": [298.15], "dewpoint_temperature_2m": [283.15],
-        "u_component_of_wind_10m": [3.0], "v_component_of_wind_10m": [4.0], "precip_30d": [0.012],
-    })
-    out = meteo.derivar_meteo_era5(df)
-    assert np.isclose(out["tmax_c"][0], 30.0)
-    assert np.isclose(out["viento_ms"][0], 5.0)
-    assert np.isclose(out["precip_30d_mm"][0], 12.0)
+# ---------- meteorología y relieve ----------
+
+from wildfire import meteo_relieve as mr  # noqa: E402
+
+
+def _perfil_con_inversion(z, z_inv=1200.0):
+    # baja 6,5 ºC/km hasta la inversión y sube 3 ºC/km por encima
+    z = np.asarray(z, dtype=float)
+    return 25.0 - 0.0065 * z + 0.0095 * np.maximum(z - z_inv, 0.0)
+
+
+def test_punto_rocio_inverso_de_humedad():
+    td = mr.punto_rocio(25.0, 60.0)
+    assert np.isclose(meteo.humedad_relativa(25.0, td), 60.0, atol=1e-6)
+
+
+def test_ajustar_perfil_detecta_inversion():
+    z = np.array([10, 200, 400, 600, 900, 1100, 1500, 1700, 2100, 2300])
+    p = mr.ajustar_perfil(z, _perfil_con_inversion(z))
+    assert p["tipo"] == "codo" and abs(p["z_codo"] - 1200) <= 100
+
+
+def test_ajustar_perfil_sin_inversion_es_recta():
+    rng = np.random.default_rng(0)
+    z = np.linspace(0, 2000, 12)
+    p = mr.ajustar_perfil(z, 25 - 0.0065 * z + rng.normal(0, 0.2, 12))
+    assert p["tipo"] == "recta" and abs(p["coef"][1] + 0.0065) < 0.001
+
+
+def test_ajustar_perfil_pocas_estaciones_es_constante():
+    assert mr.ajustar_perfil([10, 50], [20.0, 21.0])["tipo"] == "constante"
+
+
+def test_perfil_estima_mejor_que_cercana_en_altura():
+    z = np.array([10, 300, 600, 850, 2150, 2370])
+    v = _perfil_con_inversion(z)
+    dist = np.array([5, 4, 3, 2, 8, 9])      # la más cercana está a 850 m
+    real = float(_perfil_con_inversion(1800))
+    err_cercana = abs(mr.estimar("cercana", 1800, dist, z, v) - real)
+    err_perfil = abs(mr.estimar("perfil_dia", 1800, dist, z, v) - real)
+    assert err_perfil < err_cercana
+
+
+def test_gradiente_fijo():
+    est = mr.estimar("gradiente_fijo", 1000, [1.0, 2.0], [0.0, 500.0], [20.0, 18.0])
+    assert np.isclose(est, 20.0 - 6.5)
+
+
+def test_validacion_dejando_una_fuera():
+    rng = np.random.default_rng(3)
+    filas = []
+    for fecha in pd.date_range("2023-07-01", periods=5):
+        for k, z in enumerate([10, 300, 600, 900, 1500, 2100]):
+            t = _perfil_con_inversion(z) + rng.normal(0, 0.3)
+            filas.append({"indicativo": f"E{k}", "fecha": fecha, "isla": "Tenerife", "altitud": z,
+                          "lat": 28.3 + 0.01 * k, "lon": -16.5, "tmax": t + 5, "tmed": t,
+                          "hrMedia": 60.0, "velmedia": 3.0})
+    res = mr.validacion_dejando_una_fuera(pd.DataFrame(filas))
+    assert set(res["metodo"]) == set(mr.METODOS_BASE)
+    tabla = mr.resumen_errores(res)
+    mae = tabla[(tabla.variable == "tmax") & (tabla.franja == "todas")].set_index("metodo")["MAE"]
+    assert mae["perfil_residuos"] < mae["cercana"]
+
+
+# ---------- radiosondeo e inversión ----------
+
+def _cabecera_igra2(anio, mes, dia, hora, n):
+    # columnas: '#' 1, ID 2-12, año 14-17, mes 19-20, día 22-23, hora 25-26, ..., NUMLEV 33-36
+    return f"#SPM00060018 {anio:4d} {mes:02d} {dia:02d} {hora:02d} 1100 {n:4d} ncdc6310 ncdc6310  283000 -163830"
+
+
+def _nivel_igra2(gph, temp_decimas, hr_decimas):
+    # LVLTYP 1-2, ETIME 4-8, PRESS 10-15, PFLAG 16, GPH 17-21, ZFLAG 22, TEMP 23-27, TFLAG 28, RH 29-33
+    return f"21 {-9999:5d} {-9999:6d} {gph:5d}B{temp_decimas:5d}B{hr_decimas:5d} {-9999:5d} {-9999:5d} {-9999:5d}"
+
+
+def _sondeo_igra2(anio, mes, dia, hora, niveles):
+    return [_cabecera_igra2(anio, mes, dia, hora, len(niveles))] + [_nivel_igra2(*n) for n in niveles]
+
+
+def test_formato_lineas_igra2_columnas():
+    linea = _nivel_igra2(1234, -56, 789)
+    assert linea[16:21] == " 1234" and linea[22:27] == "  -56" and linea[28:33] == "  789"
+    cab = _cabecera_igra2(2023, 7, 15, 12, 5)
+    assert cab[13:17] == "2023" and cab[18:20] == "07" and cab[21:23] == "15" and cab[24:26] == "12"
+
+
+def test_leer_igra2_y_detectar_inversion():
+    # sondeo de mediodía: baja hasta 1.100 m, sube 4 ºC hasta 1.400 m y vuelve a bajar
+    niveles = [(105, 240, 700), (500, 215, 750), (1100, 176, 850), (1250, 196, 300),
+               (1400, 216, 150), (2000, 180, 100), (2500, -9999, 100), (3000, 110, 90)]
+    lineas = (_sondeo_igra2(2023, 7, 15, 0, [(105, 200, 800), (1000, 150, 800)])
+              + _sondeo_igra2(2023, 7, 15, 12, niveles)
+              + _sondeo_igra2(2016, 7, 15, 12, niveles))
+    df = mr.leer_igra2(lineas, anio_min=2017)
+    assert set(df["fecha"].dt.year) == {2023}
+    assert len(df[df["hora"] == 12]) == 7          # el nivel con temperatura ausente se descarta
+    assert np.isclose(df["temp_c"].iloc[0], 20.0)
+    inv = mr.inversiones_diarias(df)
+    assert len(inv) == 1
+    fila = inv.iloc[0]
+    assert fila["z_base"] == 1100 and fila["z_cima"] == 1400 and np.isclose(fila["intensidad"], 4.0)
+
+
+def test_sondeo_sin_inversion():
+    inv = mr.inversion_de_sondeo([100, 500, 1000, 2000], [25, 22, 18, 12])
+    assert np.isnan(inv["z_base"])
+
+
+def test_inversion_debil_no_cuenta():
+    inv = mr.inversion_de_sondeo([300, 600, 900, 1500], [20, 18, 18.2, 14])
+    assert np.isnan(inv["z_base"])
+
+
+def test_perfil_sondeo_isla_bajo_la_inversion_es_recta():
+    z = np.array([10, 300, 600, 900, 1400])          # p. ej. La Gomera, inversión a 1.600 m
+    p = mr.ajustar_perfil_sondeo(z, 25 - 0.0065 * z, 1600)
+    assert p["tipo"] == "recta" and np.isclose(p["coef"][1], -0.0065)
+
+
+def test_perfil_sondeo_situa_el_codo_en_el_hueco_de_tenerife():
+    # estaciones como Tenerife: nada entre 870 y 2.150 m; inversión real a 1.200 m
+    z = np.array([20, 150, 300, 450, 630, 870, 2150, 2370])
+    v = _perfil_con_inversion(z, 1200)
+    p = mr.ajustar_perfil_sondeo(z, v, 1200)
+    assert p["tipo"] == "codo" and p["z_codo"] == 1200
+    assert abs(mr.evaluar_perfil(p, 1600) - _perfil_con_inversion(1600, 1200)) < 1e-6
+
+
+def test_validacion_con_radiosondeo():
+    rng = np.random.default_rng(5)
+    alturas = [20, 150, 300, 450, 630, 870, 2150, 2370]
+    filas, inv = [], {}
+    for j, fecha in enumerate(pd.date_range("2023-07-01", periods=6)):
+        z_inv = 1000 + 100 * j
+        inv[fecha] = z_inv
+        for k, z in enumerate(alturas):
+            t = _perfil_con_inversion(z, z_inv) + rng.normal(0, 0.2)
+            filas.append({"indicativo": f"E{k}", "fecha": fecha, "isla": "Tenerife", "altitud": z,
+                          "lat": 28.3 + 0.01 * k, "lon": -16.5, "tmax": t + 5, "tmed": t,
+                          "hrMedia": 60.0, "velmedia": 3.0})
+    res = mr.validacion_dejando_una_fuera(pd.DataFrame(filas), inversiones=pd.Series(inv))
+    assert set(res["metodo"]) == set(mr.METODOS)
+    tabla = mr.resumen_errores(res)
+    mae = tabla[(tabla.variable == "tmax") & (tabla.franja == "todas")].set_index("metodo")["MAE"]
+    assert mae["perfil_sondeo"] < mae["cercana"]

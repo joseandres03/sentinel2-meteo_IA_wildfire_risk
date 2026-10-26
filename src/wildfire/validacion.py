@@ -1,6 +1,6 @@
 """Validación sin fugas espaciales ni temporales, métricas de clasificación y calibración.
 
-Puntos de mejora del tribunal que cubre este módulo:
+Debilidades de la evaluación de la versión 1 que cubre este módulo:
     1. Separar espacial y temporalmente entrenamiento y prueba  -> ``bloques_espaciales``,
        ``isla_de``, ``particion_temporal`` y ``prediccion_fuera_de_bloque``.
     2. Calibración de probabilidades                            -> ``tabla_fiabilidad``,

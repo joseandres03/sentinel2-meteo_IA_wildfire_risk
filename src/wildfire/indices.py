@@ -1,4 +1,4 @@
-"""Índices espectrales sobre parches Sentinel-2 y el índice heurístico de la versión 1 (TFM).
+"""Índices espectrales sobre parches Sentinel-2 y el índice heurístico de la versión 1.
 
 Los parches tienen forma (alto, ancho, 6) con las bandas en el orden de ``BANDAS_S2``:
 B2 (azul), B3 (verde), B4 (rojo), B8 (NIR), B11 (SWIR1), B12 (SWIR2).
@@ -50,7 +50,7 @@ def mascara_vegetacion(parche: np.ndarray, ndwi_max: float = 0.3, ndvi_min: floa
 
 
 def riesgo_combustible_v1(parche: np.ndarray) -> float:
-    """Riesgo de combustible del TFM: media de (1 - NDMI) / 2 sobre la vegetación válida (0 si no hay)."""
+    """Riesgo de combustible de la v1: media de (1 - NDMI) / 2 sobre la vegetación válida (0 si no hay)."""
     mascara = mascara_vegetacion(parche)
     if not mascara.any():
         return 0.0
@@ -59,7 +59,7 @@ def riesgo_combustible_v1(parche: np.ndarray) -> float:
 
 
 def riesgo_meteorologico_v1(tmax, hr_media, viento) -> np.ndarray:
-    """Riesgo meteorológico del TFM a partir de umbrales de temperatura (ºC), humedad (%) y viento."""
+    """Riesgo meteorológico de la v1 a partir de umbrales de temperatura (ºC), humedad (%) y viento."""
     r_temp = np.clip((np.asarray(tmax, dtype=float) - 15.0) / 25.0, 0.0, 1.0)
     r_hum = np.clip((80.0 - np.asarray(hr_media, dtype=float)) / 60.0, 0.0, 1.0)
     r_viento = np.clip(np.asarray(viento, dtype=float) / 50.0, 0.0, 1.0)
@@ -67,7 +67,7 @@ def riesgo_meteorologico_v1(tmax, hr_media, viento) -> np.ndarray:
 
 
 def indice_v1(riesgo_meteo, riesgo_combustible) -> np.ndarray:
-    """Índice total del TFM (variable objetivo de la v1): 0,35 meteo + 0,65 combustible.
+    """Índice total de la v1 (su variable objetivo): 0,35 meteo + 0,65 combustible.
 
     En la v2 se usa como **modelo de referencia** (baseline) frente a los modelos entrenados
     con incendios reales.
