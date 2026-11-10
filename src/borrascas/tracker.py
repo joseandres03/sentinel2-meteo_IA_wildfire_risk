@@ -38,11 +38,12 @@ class TrackerParams:
     max_speed_kmh: float = 70.0       # velocidad máxima plausible del centro
     min_search_km: float = 250.0      # radio mínimo de búsqueda por paso
     distance_penalty_hpa_per_100km: float = 1.0
-    min_depth_hpa: float = 1.0        # profundidad mínima respecto al entorno (~400 km)
+    min_depth_hpa: float = 0.6        # profundidad mínima respecto al entorno (~400 km)
     smooth_sigma_km: float = 50.0     # suavizado gaussiano
     local_min_window: int = 5         # ventana (puntos) para detectar mínimos locales
     max_pressure_hpa: float = 1020.0  # por encima de esto no lo consideramos borrasca
-    min_laplacian: float = 0.8        # plan B: laplaciano mínimo (hPa / (100 km)^2) para aceptar una baja abierta
+    min_laplacian: float = 0.5        # plan B: laplaciano mínimo (hPa / (100 km)^2) para aceptar una baja abierta
+    max_huecos: int = 1               # pasos seguidos sin encontrar la baja que se toleran (bajas débiles que se desdibujan un momento)
 
 
 @dataclass
@@ -179,6 +180,7 @@ def track(fields: dict[int, np.ndarray], grid: Grid, seed_lat: float, seed_lon: 
     prm = prm or TrackerParams()
     steps = sorted(fields)
     out: list[TrackPoint] = []
+    huecos = 0
     for k, step in enumerate(steps):
         if not out:
             if k > 0:      # no se encontró en t0 -> no hay trayectoria
@@ -200,7 +202,13 @@ def track(fields: dict[int, np.ndarray], grid: Grid, seed_lat: float, seed_lon: 
             if res and haversine_km(last.lat, last.lon, res[0], res[1]) > prm.max_speed_kmh * dt:
                 res = None
         if res is None:
-            break
+            if not out or k == 0:
+                break
+            huecos += 1          # puede ser un instante en que la baja débil se desdibuja: se sigue buscando
+            if huecos > prm.max_huecos:
+                break
+            continue
+        huecos = 0
         out.append(TrackPoint(step, *res))
     return out
 
