@@ -3,6 +3,8 @@ name: Prueba borrascas (rama)
 on:
   push:
     branches: [borrascas-v2-satelite]
+permissions:
+  contents: write
 jobs:
   prueba:
     runs-on: ubuntu-latest
@@ -22,7 +24,7 @@ jobs:
             "domain": [15, 60, -50, 10], "max_lead_h": 120, "keep_runs": 3,
             "models": ["ECMWF", "ECMWF-ENS", "AIFS", "GFS", "GEFS"]}}
           J
-          time python src/trayectorias.py --config /tmp/cfg.json --minutos 28 --out /tmp/out --models ECMWF,ECMWF-ENS,GFS,GEFS,AIFS 2>&1 | grep -v "DEBUG.*Starting new\\|DEBUG.*connectionpool" | tee /tmp/log.txt
+          time python src/trayectorias.py --config /tmp/cfg.json --minutos 28 --out /tmp/out --models GFS,GEFS,ECMWF 2>&1 | grep -v "DEBUG.*Starting new\\|DEBUG.*connectionpool" | tee /tmp/log.txt
       - name: Resumen
         if: always()
         run: |
@@ -56,6 +58,12 @@ jobs:
           (cd docs && python -m http.server 8000 >/dev/null 2>&1 &)
           sleep 2
           python .github/prueba/capturas.py
+      - name: Subir capturas a rama temporal
+        if: always()
+        run: |
+          cd /tmp/capturas && git init -q && git checkout -q -b capturas-tmp && git add . \
+            && git -c user.name=bot -c user.email=bot@x commit -q -m capturas \
+            && git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" capturas-tmp
       - uses: actions/upload-artifact@v4
         if: always()
         with:

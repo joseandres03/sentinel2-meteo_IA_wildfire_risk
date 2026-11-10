@@ -167,8 +167,8 @@
     }
 
     function urlWMS(capa, t, b, w, h, fmt) {
-      const p = map.options.crs.project;
-      const sw = p(b.getSouthWest()), ne = p(b.getNorthEast());
+      const crs = map.options.crs;
+      const sw = crs.project(b.getSouthWest()), ne = crs.project(b.getNorthEast());
       const q = new URLSearchParams({ service: 'WMS', version: '1.3.0', request: 'GetMap', layers: capa, styles: '',
         format: fmt, transparent: 'true', crs: 'EPSG:3857', bbox: [sw.x, sw.y, ne.x, ne.y].join(','),
         width: w, height: h });
