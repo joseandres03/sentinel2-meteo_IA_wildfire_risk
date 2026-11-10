@@ -20,6 +20,23 @@ El pipeline se ejecuta automáticamente cada día y publica el mapa en:
 
 ---
 
+## 🌀 Trayectoria de borrascas
+
+Pestaña del visor ([`trayectorias.html`](https://canarywildfirerisk.es/trayectorias.html)) que muestra, para cada borrasca o DANA que pueda afectar a Canarias, la trayectoria que prevé **cada modelo**:
+
+- Deterministas: ECMWF IFS, ECMWF AIFS (IA) y NOAA GFS.
+- **Todos los miembros** de sus ensembles (ECMWF ENS 51, AIFS-ENS 51, GEFS 31) y la media de cada uno.
+- La trayectoria analizada (posición real en cada pasada), para comparar lo previsto con lo ocurrido.
+- La evolución entre pasadas con la fecha de validez fija y el % de miembros cuyo centro pasa a menos de 100, 200 o 300 km de cada isla.
+
+**Cómo se calcula** ([`src/borrascas`](src/borrascas)). Se descarga solo la presión a nivel del mar de ECMWF Open Data y de NOAA (buckets públicos de AWS), y en cada miembro se sigue el mínimo de presión desde la posición de la pasada anterior. Se penaliza la distancia para no saltar a otra borrasca. Si la baja no tiene isobara cerrada, se localiza por el máximo del laplaciano de presión. El workflow [`trayectorias.yml`](.github/workflows/trayectorias.yml) lo ejecuta tras las pasadas de 00 y 12 UTC y publica los JSON en `docs/datos_borrascas/`.
+
+**Seguir una borrasca nueva.** Se añade en [`src/borrascas/borrascas.json`](src/borrascas/borrascas.json) con una posición aproximada del centro, y se lanza el workflow a mano (*Actions → Trayectorias de borrascas → Run workflow*). Con `pasada` y `backfill` se reconstruyen las pasadas de días anteriores. Cuando se disipa, se pone `"active": false`.
+
+> El % de miembros mide la incertidumbre de la **trayectoria del centro**, no la probabilidad de viento o lluvia.
+
+---
+
 ## 📖 Versión 1 (en producción)
 
 El modelo combina dos fuentes de información para estimar, en cada zona con vegetación del archipiélago, un índice de riesgo entre 0 y 1:
@@ -69,6 +86,7 @@ El workflow [`.github/workflows/actualizar.yml`](.github/workflows/actualizar.ym
 - [x] Pipeline tolerante a fallos y con registro de ejecución (`estado_pipeline.json`).
 - [x] Catálogo completo de estaciones de AEMET en Canarias (77; antes 58). Incorpora Izaña (2.369 m), Las Cañadas del Teide (2.150 m) y el Roque de los Muchachos (2.223 m).
 - [x] Descarga de la meteorología diaria completa de todas las estaciones (`Cuaderno1_datos`, apartado 5b).
+- [x] Pestaña de trayectorias de borrascas con todos los miembros de ECMWF ENS, AIFS-ENS y GEFS.
 
 **En curso**
 - [ ] **Meteorología en cualquier punto teniendo en cuenta el relieve** (`Cuaderno2_meteorologia_relieve`). En Canarias la altitud y la inversión térmica de los alisios cambian mucho la temperatura y la humedad en pocos kilómetros. Se comparan ocho métodos, midiendo su error al estimar cada estación con las demás de su isla:
@@ -103,9 +121,11 @@ Proyecto de referencia para comparar enfoques: [mesogeos](https://github.com/pau
 │   └── Cuaderno4_modelo.ipynb               # v1 · Entrenamiento y evaluación del modelo late fusion
 ├── src/
 │   ├── pipeline.py     # Pipeline de producción ejecutado por GitHub Actions
+│   ├── trayectorias.py # Trayectorias de borrascas (ECMWF, AIFS, GFS y ensembles) para el visor
+│   ├── borrascas/      # Paquete: descarga de modelos, seguimiento del centro y productos
 │   └── wildfire/       # Paquete: índices, etiquetas de incendios, validación y meteorología según el relieve
-├── tests/              # Tests del paquete wildfire (pytest)
-├── .github/workflows/  # Actualización diaria y tests
+├── tests/              # Tests de los paquetes wildfire y borrascas (pytest)
+├── .github/workflows/  # Actualización diaria, trayectorias de borrascas y tests
 └── requirements.txt    # Dependencias
 ```
 

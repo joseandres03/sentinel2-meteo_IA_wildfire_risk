@@ -1,0 +1,28 @@
+{
+  "_comentario": "Una entrada por borrasca a seguir. 'seed' es una posición APROXIMADA del centro en una fecha (UTC): basta con que esté a menos de ~450 km. A partir de la segunda pasada se usa la posición analizada de la anterior. 'domain' = [latS, latN, lonW, lonE]. Pon active=false cuando la borrasca se disipe (sus datos siguen publicados).",
+  "charles": {
+    "name": "Charles",
+    "active": true,
+    "seed": {
+      "time": "2026-11-10T00:00Z",
+      "lat": 33.0,
+      "lon": -20.0
+    },
+    "domain": [
+      15,
+      55,
+      -50,
+      5
+    ],
+    "max_lead_h": 120,
+    "models": [
+      "ECMWF",
+      "ECMWF-ENS",
+      "AIFS",
+      "AIFS-ENS",
+      "GFS",
+      "GEFS"
+    ],
+    "keep_runs": 14
+  }
+}
