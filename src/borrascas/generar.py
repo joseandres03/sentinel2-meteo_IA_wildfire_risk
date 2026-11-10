@@ -34,7 +34,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from .productos import summarize_model
-from .tracker import TrackerParams, track
+from .tracker import TrackerParams, listar_bajas, track
 
 log = logging.getLogger("borrascas")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -130,8 +130,11 @@ def actualizar_real(index, cfg, domain, deadline, fuentes, prm, rehacer=False):
                 t = seed_t + timedelta(hours=p.step * sentido)
                 pts.append({"t": iso(t), "lat": round(p.lat, 2), "lon": round(p.lon, 2), "p": round(p.p, 1), "src": "GFS"})
         if not pts:
-            raise RuntimeError(f"no se encuentra la borrasca cerca de {seed['lat']}, {seed['lon']} "
-                               f"el {seed['time']}: revisa la semilla en borrascas.json")
+            bajas = listar_bajas(campos[seed_t], grid, prm) if seed_t in campos else []
+            lista = "\n".join(f"    {la:6.1f}  {lo:7.1f}   {p:6.1f} hPa  (profundidad {d} hPa)" for la, lo, p, d in bajas[:12])
+            raise RuntimeError(f"no se encuentra la borrasca cerca de {seed['lat']}, {seed['lon']} el {iso(seed_t)}. "
+                               f"Bajas presentes en el análisis GFS de esa hora (lat, lon, presión):\n{lista or '    ninguna'}\n"
+                               "Corrige la semilla en src/borrascas/borrascas.json")
         uniq = {p["t"]: p for p in pts}
         index["observed"] = [uniq[k] for k in sorted(uniq)]
         index["seed"] = seed

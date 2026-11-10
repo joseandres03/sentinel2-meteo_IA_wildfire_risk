@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Satélite (últimas 3 h) · Canary Wildfire Risk</title>
+    <meta name="description" content="Imágenes de satélite de las últimas 3 horas sobre Canarias: Meteosat Tercera Generación (visible, infrarrojo, polvo, temperatura de fuego) y vapor de agua de MSG.">
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="trayectorias.css?v=2" />
+    <style>
+        body, html { margin: 0; padding: 0; background-color: #1a1a1a; }
+        body { padding: 16px; }
+        .ct-map { background: #000; }
+        .ct-frame { transition: opacity .15s linear; }
+        @media (max-width: 600px) { body { padding: 0; } .ct-root { border-radius: 0; } }
+    </style>
+</head>
+<body>
+    <div id="satelite"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="satelite.js?v=1"></script>
+    <script>
+        CanarySat.mount('#satelite');
+    </script>
+</body>
+</html>

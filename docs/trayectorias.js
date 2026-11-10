@@ -69,7 +69,7 @@
         </div>
         <div class="ct-spacer"></div>
         <select class="ct-select" data-k="storm" title="Borrasca"></select>
-        <nav class="ct-nav"><a href="index.html">🔥 Riesgo de incendio</a><a class="ct-active" href="trayectorias.html">🌀 Borrascas</a></nav>
+        <nav class="ct-nav"><a href="index.html">🔥 Riesgo de incendio</a><a class="ct-active" href="trayectorias.html">🌀 Borrascas</a><a href="satelite.html">🛰️ Satélite</a></nav>
       </div>
       <div class="ct-body">
         <aside class="ct-side">
@@ -83,7 +83,7 @@
             <div style="margin-top:8px;display:flex;gap:6px">
               <button class="ct-btn ct-primary" data-k="play" style="flex:1">▶ Evolución de pasadas</button>
             </div>
-            <div class="ct-note">La animación recorre las distintas inicializaciones manteniendo fija la fecha de validez: así se ve cómo han ido cambiando los modelos.</div>
+            <div class="ct-note">La animación recorre las pasadas (cada 6 h) con la fecha de validez fija: así se ve cómo han ido corrigiendo los modelos. La línea amarilla es lo que pasó de verdad después de cada pasada.</div>
           </div>
           <div class="ct-sec"><h4>Modelos</h4><div data-k="models"></div></div>
           <div class="ct-sec">
@@ -92,7 +92,7 @@
             <label class="ct-opt"><input type="checkbox" data-o="members"> Miembros del ensemble</label>
             <label class="ct-opt"><input type="checkbox" data-o="mean"> Media del ensemble</label>
             <label class="ct-opt"><input type="checkbox" data-o="dots"> Posiciones en la hora elegida</label>
-            <label class="ct-opt"><input type="checkbox" data-o="obs"> Trayectoria analizada (real)</label>
+            <label class="ct-opt"><input type="checkbox" data-o="obs"> Trayectoria real (antes y después de la pasada)</label>
             <label class="ct-opt"><input type="checkbox" data-o="prev"> Pasada anterior (en gris)</label>
             <label class="ct-opt"><input type="checkbox" data-o="ring"> Radio de 200 km alrededor de Canarias</label>
           </div>
@@ -101,7 +101,8 @@
             <div><span class="ct-l"></span>Determinista (escenario único)</div>
             <div><span class="ct-l ct-thin"></span>Miembro del ensemble</div>
             <div><span class="ct-l ct-dash"></span>Media del ensemble</div>
-            <div><span class="ct-l" style="border-top-style:dotted"></span>Trayectoria analizada</div>
+            <div><span class="ct-l" style="border-top-style:dotted"></span>Trayectoria real hasta la pasada</div>
+            <div><span class="ct-l" style="border-color:#ffe14d"></span>Trayectoria real posterior</div>
           </div>
         </aside>
         <div class="ct-main">
@@ -272,16 +273,24 @@
         }
       }
 
-      // trayectoria analizada (posición t+0 de cada pasada hasta la actual)
+      // trayectoria real (análisis): hasta la hora de la pasada, y la posterior en otro estilo
+      // para comparar lo que preveía esta pasada con lo que ocurrió después
       if (S.o.obs && S.index.observed && S.index.observed.length) {
         const upto = new Date(d.run).getTime();
-        const obs = S.index.observed.filter((o) => new Date(o.t).getTime() <= upto);
-        if (obs.length > 1) L.polyline(obs.map((o) => [o.lat, o.lon]), { color: '#fff', weight: 2.5, dashArray: '1 6', lineCap: 'round' }).addTo(G.obs);
-        obs.forEach((o, i) => {
-          const mk = L.circleMarker([o.lat, o.lon], { radius: 5, color: '#fff', weight: 2, fillColor: '#222', fillOpacity: 1 })
-            .bindTooltip(`<b>Análisis ${fmtT(new Date(o.t))}</b><br>${o.p.toFixed(0)} hPa · fuente ${esc(o.src)}`, { className: 'ct-tip' });
-          mk.addTo(G.obs);
-          if (i === obs.length - 1 || i % 2 === 0) {
+        const antes = S.index.observed.filter((o) => new Date(o.t).getTime() <= upto);
+        const despues = S.index.observed.filter((o) => new Date(o.t).getTime() >= upto);
+        if (antes.length > 1) L.polyline(antes.map((o) => [o.lat, o.lon]), { color: '#fff', weight: 2.5, dashArray: '1 6', lineCap: 'round' }).addTo(G.obs);
+        if (despues.length > 1) {
+          L.polyline(despues.map((o) => [o.lat, o.lon]), { color: '#000', weight: 6, opacity: 0.35, interactive: false }).addTo(G.obs);
+          L.polyline(despues.map((o) => [o.lat, o.lon]), { color: '#ffe14d', weight: 3 })
+            .bindTooltip('<b>Trayectoria real posterior</b><br>Lo que ocurrió después de esta pasada', { sticky: true, className: 'ct-tip' }).addTo(G.obs);
+        }
+        S.index.observed.forEach((o, i) => {
+          const post = new Date(o.t).getTime() > upto;
+          L.circleMarker([o.lat, o.lon], { radius: post ? 3.5 : 5, color: post ? '#ffe14d' : '#fff', weight: 2, fillColor: '#222', fillOpacity: 1 })
+            .bindTooltip(`<b>${post ? 'Real (posterior)' : 'Real'} · ${fmtT(new Date(o.t))}</b><br>${o.p.toFixed(0)} hPa · análisis ${esc(o.src)}`, { className: 'ct-tip' })
+            .addTo(G.obs);
+          if (new Date(o.t).getUTCHours() === 0) {
             L.tooltip({ permanent: true, direction: 'left', offset: [-6, 0], className: 'ct-obs-label' })
               .setLatLng([o.lat, o.lon]).setContent(fmtShort(new Date(o.t))).addTo(G.obs);
           }
