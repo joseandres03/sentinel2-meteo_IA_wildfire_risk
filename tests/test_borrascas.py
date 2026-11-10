@@ -76,7 +76,10 @@ def test_posicion_real_interpolada():
     from borrascas.generar import parse_time, pos_en
     obs = [{"t": "2026-11-10T00:00Z", "lat": 30.0, "lon": -20.0}, {"t": "2026-11-10T06:00Z", "lat": 29.0, "lon": -19.0}]
     assert pos_en(obs, parse_time("2026111003")) == (29.5, -19.5)
-    assert pos_en(obs, parse_time("2026111012")) is None
+    # tras el último análisis se usa la última posición conocida (hasta 48 h); más allá, nada
+    assert pos_en(obs, parse_time("2026111012")) == (29.0, -19.0)
+    assert pos_en(obs, parse_time("2026111306")) is None
+    assert pos_en(obs, parse_time("2026110912")) is None
 
 
 class _Resp:
@@ -103,3 +106,20 @@ def test_urls_ecmwf():
     r = datetime(2026, 11, 10, 6, tzinfo=timezone.utc)
     assert _ecmwf_url("B", r, "ifs", False, 24).endswith("20261110/06z/ifs/0p25/scda/20261110060000-24h-scda-fc.grib2")
     assert _ecmwf_url("B", r, "ifs", True, 24).endswith("20261110/06z/ifs/0p25/enfo/20261110060000-24h-enfo-ef.grib2")
+
+
+def test_tracker_tolera_un_hueco():
+    """Una baja débil que se desdibuja un paso y reaparece no corta la trayectoria."""
+    import numpy as np
+    from borrascas.tracker import Grid, track, TrackerParams
+    lats = np.arange(20.0, 40.01, 0.5)
+    lons = np.arange(-50.0, -20.99, 0.5)
+    grid = Grid(lats, lons)
+    LON, LAT = np.meshgrid(lons, lats)
+
+    def campo(clat, clon, prof):
+        d2 = ((LAT - clat) * 111) ** 2 + ((LON - clon) * 96) ** 2
+        return 1015.0 - prof * np.exp(-d2 / (2 * 300.0 ** 2))
+    fields = {0: campo(30, -40, 8), 6: campo(30, -38, 6), 12: np.full_like(LAT, 1015.0), 18: campo(29.5, -35, 4)}
+    assert len(track(fields, grid, 30, -40, TrackerParams())) == 3
+    assert len(track(fields, grid, 30, -40, TrackerParams(max_huecos=0))) == 2

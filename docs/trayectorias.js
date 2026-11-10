@@ -185,7 +185,8 @@
         S.hour = Math.max(0, Math.min(maxH, h));
       }
       slider.value = S.hour;
-      $('sub').innerHTML = `Pasada <b>${fmtT(new Date(d.run))}</b> · generado ${esc(new Date(d.generated).toLocaleString('es-ES', { timeZone: 'Atlantic/Canary' }))} (hora canaria)`;
+      $('sub').innerHTML = `Pasada <b>${fmtT(new Date(d.run))}</b> · generado ${esc(new Date(d.generated).toLocaleString('es-ES', { timeZone: 'Atlantic/Canary' }))} (hora canaria)`
+        + (S.index.disipada ? `<br><span style="color:#b30000">La baja no se localiza en los análisis del GFS desde ${esc(fmtT(new Date(S.index.disipada)))}: puede haberse disipado o ser demasiado débil. Las pasadas posteriores parten de su última posición conocida.</span>` : '');
       renderModels(d);
       if (S.o.prev && i > 0) await runData(i - 1);
       draw();

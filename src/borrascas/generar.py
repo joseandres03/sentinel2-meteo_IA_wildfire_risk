@@ -42,6 +42,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(HERE))
 OUT_DEFAULT = os.path.join(BASE_DIR, "docs", "datos_borrascas")
 
 ABANDONAR_TRAS_H = 30      # si un modelo no aparece en 30 h, se da por perdido
+MAX_SIN_ANALISIS_H = 48    # pasadas que se siguen calculando tras la última vez que se vio la baja en los análisis
 ANALISIS_ATRAS_H = 120     # cuánto se busca la borrasca hacia atrás desde la semilla
 
 
@@ -91,6 +92,10 @@ def pos_en(observed, t: datetime):
             return a["lat"] + f * (b["lat"] - a["lat"]), a["lon"] + f * (b["lon"] - a["lon"])
     if pts and pts[0][0] == t:
         return pts[0][1]["lat"], pts[0][1]["lon"]
+    # pasadas posteriores al último análisis en que se localizó la baja:
+    # se parte de su última posición conocida; el seguidor ya busca en un radio amplio
+    if pts and t > pts[-1][0] and (t - pts[-1][0]).total_seconds() <= MAX_SIN_ANALISIS_H * 3600:
+        return pts[-1][1]["lat"], pts[-1][1]["lon"]
     return None
 
 
@@ -139,9 +144,14 @@ def actualizar_real(index, cfg, domain, deadline, fuentes, prm, rehacer=False):
         index["observed"] = [uniq[k] for k in sorted(uniq)]
         index["seed"] = seed
         index.pop("disipada", None)
+        ult_vista = parse_time(index["observed"][-1]["t"])
+        if ult_vista < ultimo:
+            index["disipada"] = iso(ult_vista)
+            log.info("  la borrasca no se localiza en los análisis tras %s (último análisis: %s)", iso(ult_vista), iso(ultimo))
         return True
 
-    if index.get("disipada"):
+    last_t = parse_time(observed[-1]["t"])
+    if index.get("disipada") and (ahora - last_t).total_seconds() > MAX_SIN_ANALISIS_H * 3600:
         return False
     # extender hacia delante con los análisis nuevos
     last = observed[-1]
@@ -156,9 +166,11 @@ def actualizar_real(index, cfg, domain, deadline, fuentes, prm, rehacer=False):
     nuevos = [{"t": iso(last_t + timedelta(hours=p.step)), "lat": round(p.lat, 2), "lon": round(p.lon, 2),
                "p": round(p.p, 1), "src": "GFS"} for p in tr if p.step > 0]
     index["observed"] = observed + nuevos
-    if len(tr) < len(fields):
-        index["disipada"] = iso(last_t + timedelta(hours=(tr[-1].step if tr else 0)))
-        log.info("  la borrasca ya no aparece en los análisis tras %s", index["disipada"])
+    if tr and tr[-1].step < max(fields):
+        index["disipada"] = iso(last_t + timedelta(hours=tr[-1].step))
+        log.info("  la borrasca no se localiza en los análisis tras %s", index["disipada"])
+    elif tr and tr[-1].step == max(fields):
+        index.pop("disipada", None)     # se ha vuelto a localizar
     if nuevos:
         log.info("  trayectoria real: +%d análisis (hasta %s)", len(nuevos), nuevos[-1]["t"])
     return bool(nuevos) or bool(index.get("disipada"))
@@ -197,12 +209,13 @@ def procesar_modelo(key, spec, run, seed, cfg, prm, deadline):
 
 
 def candidatas(index, cfg, ahora):
-    """Pasadas a considerar: cada 6 h dentro de la trayectoria real, las `keep_runs` más recientes."""
+    """Pasadas a considerar: cada 6 h desde el inicio de la trayectoria real hasta ahora, las `keep_runs` más recientes."""
     obs = index.get("observed") or []
     if not obs:
         return []
     ini, fin = parse_time(obs[0]["t"]), parse_time(obs[-1]["t"])
-    fin = min(fin, ahora)
+    # incluye pasadas posteriores al último análisis donde se vio la baja (hasta MAX_SIN_ANALISIS_H)
+    fin = min(ahora, fin + timedelta(hours=MAX_SIN_ANALISIS_H))
     t = fin.replace(hour=fin.hour - fin.hour % 6, minute=0)
     out = []
     while t >= ini and len(out) < cfg.get("keep_runs", 16):
