@@ -203,3 +203,16 @@ def track(fields: dict[int, np.ndarray], grid: Grid, seed_lat: float, seed_lon: 
             break
         out.append(TrackPoint(step, *res))
     return out
+
+
+def listar_bajas(field_hpa, grid: Grid, prm: TrackerParams | None = None, max_p=1016.0):
+    """Todas las bajas cerradas del campo: [(lat, lon, p, profundidad)], de más a menos profunda.
+    Sirve para encontrar la semilla de una borrasca nueva."""
+    prm = prm or TrackerParams()
+    sm, is_min = _prepare(field_hpa, grid, prm)
+    out = []
+    for i, j in np.argwhere(is_min & (sm <= max_p)):
+        dep = _depth(sm, grid, i, j)
+        if dep >= prm.min_depth_hpa:
+            out.append((round(float(grid.lats[i]), 1), round(float(grid.lons[j]), 1), round(float(field_hpa[i, j]), 1), round(dep, 1)))
+    return sorted(out, key=lambda x: x[2])

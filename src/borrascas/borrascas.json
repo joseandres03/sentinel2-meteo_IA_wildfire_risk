@@ -1,12 +1,12 @@
 {
-  "_comentario": "Una entrada por borrasca a seguir. 'seed' es una posición APROXIMADA del centro en una fecha (UTC): basta con que esté a menos de ~450 km. A partir de la segunda pasada se usa la posición analizada de la anterior. 'domain' = [latS, latN, lonW, lonE]. Pon active=false cuando la borrasca se disipe (sus datos siguen publicados).",
+  "_comentario": "Una entrada por borrasca a seguir. 'seed' es una posición APROXIMADA del centro en una fecha (UTC) cualquiera de su vida: basta con que esté a menos de ~450 km. A partir de ella se reconstruye la trayectoria real con los análisis del GFS (hacia atrás y hacia delante) y cada pasada de los modelos arranca en la posición real a su hora. Si cambias la semilla, la trayectoria real se recalcula sola. 'domain' = [latS, latN, lonW, lonE]. 'keep_runs' = nº de pasadas (cada 6 h) que se publican. Modelos disponibles: ECMWF, ECMWF-ENS, AIFS, AIFS-ENS (muy pesado), GFS, GEFS. Pon active=false cuando la borrasca se disipe (sus datos siguen publicados).",
   "charles": {
     "name": "Charles",
-    "active": true,
+    "active": false,
     "seed": {
       "time": "2026-11-10T00:00Z",
-      "lat": 33.0,
-      "lon": -20.0
+      "lat": 30.8,
+      "lon": -40.5
     },
     "domain": [
       15,
@@ -19,10 +19,9 @@
       "ECMWF",
       "ECMWF-ENS",
       "AIFS",
-      "AIFS-ENS",
       "GFS",
       "GEFS"
     ],
-    "keep_runs": 14
+    "keep_runs": 16
   }
 }

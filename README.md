@@ -25,15 +25,26 @@ El pipeline se ejecuta automáticamente cada día y publica el mapa en:
 Pestaña del visor ([`trayectorias.html`](https://canarywildfirerisk.es/trayectorias.html)) que muestra, para cada borrasca o DANA que pueda afectar a Canarias, la trayectoria que prevé **cada modelo**:
 
 - Deterministas: ECMWF IFS, ECMWF AIFS (IA) y NOAA GFS.
-- **Todos los miembros** de sus ensembles (ECMWF ENS 51, AIFS-ENS 51, GEFS 31) y la media de cada uno.
-- La trayectoria analizada (posición real en cada pasada), para comparar lo previsto con lo ocurrido.
-- La evolución entre pasadas con la fecha de validez fija y el % de miembros cuyo centro pasa a menos de 100, 200 o 300 km de cada isla.
+- **Todos los miembros** de sus ensembles (ECMWF ENS, 50 miembros; NOAA GEFS, 31) y la media de cada uno. AIFS-ENS está disponible, pero desactivado por defecto porque duplica la descarga más pesada.
+- La **trayectoria real**, calculada con los análisis del GFS. En cada pasada se ve qué preveía el modelo y, en amarillo, lo que ocurrió después.
+- La evolución entre pasadas (cada 6 h) con la fecha de validez fija y el % de miembros cuyo centro pasa a menos de 100, 200 o 300 km de cada isla.
 
-**Cómo se calcula** ([`src/borrascas`](src/borrascas)). Se descarga solo la presión a nivel del mar de ECMWF Open Data y de NOAA (buckets públicos de AWS), y en cada miembro se sigue el mínimo de presión desde la posición de la pasada anterior. Se penaliza la distancia para no saltar a otra borrasca. Si la baja no tiene isobara cerrada, se localiza por el máximo del laplaciano de presión. El workflow [`trayectorias.yml`](.github/workflows/trayectorias.yml) lo ejecuta tras las pasadas de 00 y 12 UTC y publica los JSON en `docs/datos_borrascas/`.
+**Cómo se calcula** ([`src/borrascas`](src/borrascas)):
+- Solo se descarga la presión a nivel del mar. Cada fichero GRIB2 publicado tiene un índice, y se pide únicamente el trozo de la presión, con peticiones en paralelo, tiempos de espera cortos y cambio automático de espejo (servidor de ECMWF → AWS → Google; NOAA desde AWS).
+- La trayectoria real se reconstruye con los análisis del GFS hacia atrás (hasta que se forma la borrasca) y hacia delante desde la posición de `borrascas.json`. Cada pasada de cada modelo empieza en la posición real a su hora.
+- El workflow [`trayectorias.yml`](.github/workflows/trayectorias.yml) se ejecuta **cada hora**. Comprueba qué pasadas (00/06/12/18 UTC) han publicado ya ECMWF y NOAA y procesa solo las nuevas, de la más reciente a la más antigua, con un límite de 30 min. Lo que no da tiempo se queda para la hora siguiente. Una pasada completa con todos los modelos tarda alrededor de un minuto.
 
-**Seguir una borrasca nueva.** Se añade en [`src/borrascas/borrascas.json`](src/borrascas/borrascas.json) con una posición aproximada del centro, y se lanza el workflow a mano (*Actions → Trayectorias de borrascas → Run workflow*). Con `pasada` y `backfill` se reconstruyen las pasadas de días anteriores. Cuando se disipa, se pone `"active": false`.
+**Seguir una borrasca nueva.** Se añade en [`src/borrascas/borrascas.json`](src/borrascas/borrascas.json) con una posición aproximada del centro en cualquier momento de su vida (basta con estar a menos de unos 450 km) y `"active": true`. Si la posición no es buena, el registro del workflow lista las bajas que hay en el análisis de esa hora para elegir la correcta. Cuando se disipa, se pone `"active": false`.
 
 > El % de miembros mide la incertidumbre de la **trayectoria del centro**, no la probabilidad de viento o lluvia.
+
+## 🛰️ Satélite (últimas 3 horas)
+
+Pestaña [`satelite.html`](https://canarywildfirerisk.es/satelite.html) con la animación de las últimas 3 horas sobre Canarias:
+- **MTG-I (cada 10 min):** GeoColour, visible 0,6 µm, infrarrojo 10,5 µm, polvo (calima) y temperatura de fuego.
+- **MSG (cada 15 min):** vapor de agua 6,2 µm y masas de aire.
+
+Las imágenes las sirve directamente EUMETSAT ([EUMETView](https://view.eumetsat.int), WMS público), así que no hay nada que descargar ni guardar en el repositorio. Su servidor es lento, de modo que cada fotograma es una única imagen de la vista actual. Se piden 3 a la vez, empezando por la más reciente, y la animación usa los fotogramas que ya han llegado.
 
 ---
 
@@ -86,7 +97,8 @@ El workflow [`.github/workflows/actualizar.yml`](.github/workflows/actualizar.ym
 - [x] Pipeline tolerante a fallos y con registro de ejecución (`estado_pipeline.json`).
 - [x] Catálogo completo de estaciones de AEMET en Canarias (77; antes 58). Incorpora Izaña (2.369 m), Las Cañadas del Teide (2.150 m) y el Roque de los Muchachos (2.223 m).
 - [x] Descarga de la meteorología diaria completa de todas las estaciones (`Cuaderno1_datos`, apartado 5b).
-- [x] Pestaña de trayectorias de borrascas con todos los miembros de ECMWF ENS, AIFS-ENS y GEFS.
+- [x] Pestaña de trayectorias de borrascas con todos los miembros de ECMWF ENS y GEFS, y trayectoria real.
+- [x] Visor de satélite MTG/MSG de las últimas 3 horas.
 
 **En curso**
 - [ ] **Meteorología en cualquier punto teniendo en cuenta el relieve** (`Cuaderno2_meteorologia_relieve`). En Canarias la altitud y la inversión térmica de los alisios cambian mucho la temperatura y la humedad en pocos kilómetros. Se comparan ocho métodos, midiendo su error al estimar cada estación con las demás de su isla:
@@ -121,7 +133,7 @@ Proyecto de referencia para comparar enfoques: [mesogeos](https://github.com/pau
 │   └── Cuaderno4_modelo.ipynb               # v1 · Entrenamiento y evaluación del modelo late fusion
 ├── src/
 │   ├── pipeline.py     # Pipeline de producción ejecutado por GitHub Actions
-│   ├── trayectorias.py # Trayectorias de borrascas (ECMWF, AIFS, GFS y ensembles) para el visor
+│   ├── trayectorias.py # Trayectorias de borrascas (ECMWF, AIFS, GFS y ensembles), cada hora
 │   ├── borrascas/      # Paquete: descarga de modelos, seguimiento del centro y productos
 │   └── wildfire/       # Paquete: índices, etiquetas de incendios, validación y meteorología según el relieve
 ├── tests/              # Tests de los paquetes wildfire y borrascas (pytest)
