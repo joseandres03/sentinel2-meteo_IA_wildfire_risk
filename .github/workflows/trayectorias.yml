@@ -1,0 +1,74 @@
+name: Trayectorias de borrascas
+
+on:
+  schedule:
+    # Las pasadas de 00 y 12 UTC (ENS incluido) están completas unas 8-9 h después
+    - cron: '40 9,21 * * *'
+  workflow_dispatch:
+    inputs:
+      borrasca:
+        description: 'Clave en src/borrascas/borrascas.json (vacío = todas las activas)'
+        required: false
+        default: ''
+      pasada:
+        description: 'Pasada YYYYMMDDHH, 00 o 12 UTC (vacío = la última disponible)'
+        required: false
+        default: ''
+      backfill:
+        description: 'Nº de pasadas anteriores a reconstruir (0 = solo la indicada)'
+        required: false
+        default: '0'
+      modelos:
+        description: 'Modelos separados por comas (vacío = los de borrascas.json)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: trayectorias
+  cancel-in-progress: false
+
+jobs:
+  trayectorias:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Clonar Repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar entorno Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar Librerías de Python
+        run: |
+          pip install --upgrade pip
+          pip install numpy scipy requests eccodes ecmwf-opendata
+
+      - name: Calcular trayectorias
+        env:
+          ECMWF_SOURCE: aws
+          BORRASCA: ${{ github.event.inputs.borrasca }}
+          PASADA: ${{ github.event.inputs.pasada }}
+          BACKFILL: ${{ github.event.inputs.backfill }}
+          MODELOS: ${{ github.event.inputs.modelos }}
+        run: |
+          ARGS=""
+          [ -n "$BORRASCA" ] && ARGS="$ARGS --storm $BORRASCA"
+          [ -n "$PASADA" ]   && ARGS="$ARGS --run $PASADA"
+          [ -n "$BACKFILL" ] && [ "$BACKFILL" != "0" ] && ARGS="$ARGS --backfill $BACKFILL"
+          [ -n "$MODELOS" ]  && ARGS="$ARGS --models $MODELOS"
+          python src/trayectorias.py $ARGS
+
+      - name: Subir cambios automáticamente a la Web
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add docs/datos_borrascas/ 2>/dev/null || exit 0
+          git commit -m "Trayectorias de borrascas: $(date -u +'%Y-%m-%d %H:%M') UTC" || exit 0
+          # por si el pipeline de riesgo ha publicado mientras tanto
+          git pull --rebase origin main
+          git push

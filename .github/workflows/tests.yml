@@ -16,6 +16,6 @@ jobs:
         with:
           python-version: '3.10'
       - name: Instalar dependencias de los tests
-        run: pip install numpy pandas scikit-learn pytest
+        run: pip install numpy pandas scipy scikit-learn pytest
       - name: Ejecutar tests
         run: pytest -q tests
