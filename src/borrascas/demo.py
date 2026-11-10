@@ -116,10 +116,10 @@ def _cat():
                     max_lead={0: 240, 6: 120, 12: 240, 18: 120}, parent=parent)
     return {
         "ECMWF": m("ECMWF IFS", "deterministic", "#ff4d4d", 6, make_fetch("ECMWF", False, 1, 1)),
-        "ECMWF-ENS": m("ECMWF ENS (51)", "ensemble", "#ff9a9a", 12, make_fetch("ECMWF", True, 51, 2), "ECMWF"),
+        "ECMWF-ENS": m("ECMWF ENS", "ensemble", "#ff9a9a", 12, make_fetch("ECMWF", True, 51, 2), "ECMWF"),
         "AIFS": m("ECMWF AIFS (IA)", "deterministic", "#c77dff", 6, make_fetch("AIFS", False, 1, 3)),
         "GFS": m("NOAA GFS", "deterministic", "#3da5ff", 6, make_fetch("GFS", False, 1, 4)),
-        "GEFS": m("NOAA GEFS (31)", "ensemble", "#8fd0ff", 6, make_fetch("GFS", True, 31, 5), "GFS"),
+        "GEFS": m("NOAA GEFS", "ensemble", "#8fd0ff", 6, make_fetch("GFS", True, 31, 5), "GFS"),
     }
 
 

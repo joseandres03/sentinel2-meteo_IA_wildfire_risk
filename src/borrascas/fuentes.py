@@ -142,8 +142,8 @@ def _read_grib(path, domain):
 def _descargar_trozos(trozos, domain, deadline, clave_override=None):
     """trozos: lista de (clave, url, (ini, fin)). Descarga en paralelo y decodifica.
     clave = (miembro, paso) o None (se usan los de dentro del GRIB).
-    Devuelve ({miembro: {paso: campo}}, grid, fallos)."""
-    fields, grid, fallos = {}, None, 0
+    Devuelve ({miembro: {paso: campo}}, grid, trozos_fallidos)."""
+    fields, grid, fallos = {}, None, []
     with tempfile.TemporaryDirectory() as tmp:
         def job(i, clave, url, rango):
             data = http_get(url, rango=rango, deadline=deadline).content
@@ -154,7 +154,7 @@ def _descargar_trozos(trozos, domain, deadline, clave_override=None):
 
         with ThreadPoolExecutor(HILOS) as ex:
             futs = [ex.submit(job, i, c, u, r) for i, (c, u, r) in enumerate(trozos)]
-            for fut in futs:
+            for trozo, fut in zip(trozos, futs):
                 try:
                     clave, msgs = fut.result()
                 except SinTiempo:
@@ -162,8 +162,8 @@ def _descargar_trozos(trozos, domain, deadline, clave_override=None):
                         f.cancel()
                     raise
                 except Exception as e:
-                    fallos += 1
-                    log.warning("descarga fallida: %s", e)
+                    fallos.append(trozo)
+                    log.debug("descarga fallida: %s", e)
                     continue
                 for number, step, g, data in msgs:
                     mem, st = clave if clave else (number, step)
@@ -178,7 +178,6 @@ def _descargar_trozos(trozos, domain, deadline, clave_override=None):
 
 ECMWF_ESPEJOS = {
     "aws": "https://ecmwf-forecasts.s3.eu-central-1.amazonaws.com",
-    "azure": "https://ai4edataeuwest.blob.core.windows.net/ecmwf",
     "ecmwf": "https://data.ecmwf.int/forecasts",
     "google": "https://storage.googleapis.com/ecmwf-open-data",
 }
@@ -228,10 +227,22 @@ def fetch_ecmwf(run, steps, domain, *, model="ifs", ensemble=False, deadline=Non
             with ThreadPoolExecutor(min(HILOS, len(steps))) as ex:
                 trozos = [t for lst in ex.map(idx, steps) for t in lst]
             fields, grid, fallos = _descargar_trozos(trozos, domain, deadline)
+            n_fallos = len(fallos)
+            # los trozos que fallen (503 sueltos) se reintentan en los otros espejos
+            actual = base
+            for otro in [e for e in _orden_espejos() if e != espejo]:
+                if not fallos:
+                    break
+                rehacer = [(c, u.replace(actual, ECMWF_ESPEJOS[otro], 1), r) for c, u, r in fallos]
+                actual = ECMWF_ESPEJOS[otro]
+                f2, g2, fallos = _descargar_trozos(rehacer, domain, deadline)
+                for mem, d in f2.items():
+                    fields.setdefault(mem, {}).update(d)
+                grid = grid or g2
             if grid is None:
                 raise RuntimeError("sin campos válidos")
-            log.info("    %s %s: %d campos desde %s (%d fallos)", model, "ENS" if ensemble else "det",
-                     len(trozos) - fallos, espejo, fallos)
+            log.info("    %s %s: %d campos desde %s (%d reintentados en otro espejo, %d perdidos)", model,
+                     "ENS" if ensemble else "det", len(trozos) - len(fallos), espejo, n_fallos, len(fallos))
             return fields, grid
         except (SinTiempo, NoPublicado):
             raise
@@ -288,10 +299,15 @@ def _fetch_noaa(urls: dict, domain, deadline):
     if not trozos:
         raise NoPublicado("ningún fichero NOAA publicado")
     fields, grid, fallos = _descargar_trozos(trozos, domain, deadline)
+    if fallos:   # segundo intento de los que hayan fallado
+        f2, g2, fallos = _descargar_trozos(fallos, domain, deadline)
+        for mem, d in f2.items():
+            fields.setdefault(mem, {}).update(d)
+        grid = grid or g2
     if grid is None:
         raise RuntimeError("sin campos válidos")
-    log.info("    NOAA: %d campos (%d no publicados, %d fallos)", len(trozos) - fallos,
-             len(urls) - len(trozos), fallos)
+    log.info("    NOAA: %d campos (%d no publicados, %d perdidos)", len(trozos) - len(fallos),
+             len(urls) - len(trozos), len(fallos))
     return fields, grid
 
 
@@ -344,8 +360,9 @@ def ultimo_analisis_gfs(desde: datetime, hasta: datetime, deadline=None):
 # --------------------------------------------------------------------------
 # step: intervalo (h) entre los campos usados para el seguimiento.
 # max_lead: plazo máximo que publica el modelo en cada pasada {hora: h}.
-# Los ENS de ECMWF van cada 12 h para no multiplicar la descarga (51 campos
-# globales por paso; ECMWF no permite recortar por zona).
+# Los ENS de ECMWF van cada 12 h para no multiplicar la descarga (50 campos
+# globales por paso; ECMWF no permite recortar por zona). En Open Data el control
+# del ENS no incluye la presión, así que salen 50 miembros.
 
 def _m(label, kind, color, step, fetch, publicado, max_lead, parent=None, defecto=True):
     return dict(label=label, kind=kind, color=color, step=step, fetch=fetch, publicado=publicado,
@@ -358,7 +375,7 @@ MODELS = {
                 lambda r, s, d, dl: fetch_ecmwf(r, s, d, model="ifs", deadline=dl),
                 lambda r, last, dl: publicado_ecmwf(r, last, model="ifs", deadline=dl),
                 {0: 240, 6: 90, 12: 240, 18: 90}),
-    "ECMWF-ENS": _m("ECMWF ENS (51)", "ensemble", "#ff9a9a", 12,
+    "ECMWF-ENS": _m("ECMWF ENS", "ensemble", "#ff9a9a", 12,
                     lambda r, s, d, dl: fetch_ecmwf(r, s, d, model="ifs", ensemble=True, deadline=dl),
                     lambda r, last, dl: publicado_ecmwf(r, last, model="ifs", ensemble=True, deadline=dl),
                     {0: 360, 6: 144, 12: 360, 18: 144}, parent="ECMWF"),
@@ -366,7 +383,7 @@ MODELS = {
                lambda r, s, d, dl: fetch_ecmwf(r, s, d, model="aifs-single", deadline=dl),
                lambda r, last, dl: publicado_ecmwf(r, last, model="aifs-single", deadline=dl),
                _4),
-    "AIFS-ENS": _m("ECMWF AIFS-ENS (51)", "ensemble", "#dcb6ff", 12,
+    "AIFS-ENS": _m("ECMWF AIFS-ENS", "ensemble", "#dcb6ff", 12,
                    lambda r, s, d, dl: fetch_ecmwf(r, s, d, model="aifs-ens", ensemble=True, deadline=dl),
                    lambda r, last, dl: publicado_ecmwf(r, last, model="aifs-ens", ensemble=True, deadline=dl),
                    _4, parent="AIFS", defecto=False),
@@ -374,7 +391,7 @@ MODELS = {
               lambda r, s, d, dl: fetch_gfs(r, s, d, deadline=dl),
               lambda r, last, dl: publicado_url(_gfs(r, last) + ".idx", dl),
               {0: 384, 6: 384, 12: 384, 18: 384}),
-    "GEFS": _m("NOAA GEFS (31)", "ensemble", "#8fd0ff", 6,
+    "GEFS": _m("NOAA GEFS", "ensemble", "#8fd0ff", 6,
                lambda r, s, d, dl: fetch_gefs(r, s, d, deadline=dl),
                lambda r, last, dl: publicado_url(_gefs(r, 30, last) + ".idx", dl),
                {0: 384, 6: 384, 12: 384, 18: 384}, parent="GFS"),
