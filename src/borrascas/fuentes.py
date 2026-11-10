@@ -184,7 +184,7 @@ ECMWF_ESPEJOS = {
 
 
 def _orden_espejos():
-    pref = os.environ.get("ECMWF_SOURCE", "aws")
+    pref = os.environ.get("ECMWF_SOURCE", "ecmwf")
     return [pref] + [k for k in ECMWF_ESPEJOS if k != pref]
 
 

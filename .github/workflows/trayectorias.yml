@@ -49,7 +49,7 @@ jobs:
 
       - name: Calcular trayectorias
         env:
-          ECMWF_SOURCE: aws
+          ECMWF_SOURCE: ecmwf
           BORRASCA: ${{ github.event.inputs.borrasca }}
           MODELOS: ${{ github.event.inputs.modelos }}
           REHACER: ${{ github.event.inputs.rehacer }}

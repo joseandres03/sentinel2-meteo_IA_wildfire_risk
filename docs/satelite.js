@@ -3,6 +3,9 @@
  * Imágenes de Meteosat Tercera Generación (MTG-I, cada 10 min) y MSG (cada 15 min)
  * servidas directamente por EUMETSAT (EUMETView, WMS público). No hay servidor propio:
  * el navegador pide cada fotograma a EUMETSAT con el parámetro TIME.
+ * EUMETView es lento (10–60 s por imagen), así que cada fotograma es UNA imagen de la
+ * vista actual (no cientos de mosaicos), se piden pocas a la vez empezando por la más
+ * reciente, y la animación usa solo los fotogramas que ya han llegado.
  * Requiere Leaflet 1.9 y trayectorias.css (comparte estilos .ct-).
  */
 (function () {
@@ -29,7 +32,8 @@
     { id: 'mtg_fd:rgb_firetemperature', nombre: 'Temperatura de fuego', sat: 'MTG', min: 10, lag: 20,
       txt: 'Incendios activos en rojo, amarillo o blanco según su intensidad. Ojo: de día el suelo muy caliente también puede verse rojizo.' },
   ];
-  const FRP = { id: 'mtg_fd:frp', nombre: 'Potencia radiativa del fuego (FRP)' };
+  const SIMULTANEAS = 3;      // EUMETView es lento: pocas peticiones a la vez
+  const ESPERA_MAX = 90e3;    // tiempo máximo por fotograma
 
   const pad = (n) => String(n).padStart(2, '0');
   const fmtUTC = (d) => `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
@@ -84,7 +88,6 @@
           <div class="ct-sec"><h4>Canal</h4><div data-k="canales"></div></div>
           <div class="ct-sec">
             <h4>Capas</h4>
-            <label class="ct-opt"><input type="checkbox" data-k="frp"> Puntos calientes (FRP)</label>
             <label class="ct-opt"><input type="checkbox" data-k="costa" checked> Costa y nombres</label>
           </div>
           <div class="ct-sec">
@@ -110,19 +113,17 @@
     const map = L.map($('map'), { minZoom: 3, maxZoom: 9, zoomSnap: 0.5 })
       .fitBounds(opts.bounds || [[25.3, -19.5], [31.2, -12.0]]);
     map.createPane('frames').style.zIndex = 300;
-    map.createPane('frp').style.zIndex = 420;
     map.createPane('ref').style.zIndex = 450;
     map.getPane('ref').style.pointerEvents = 'none';
-    // Referencia: costa de EUMETSAT y nombres/límites de Esri, encima de la imagen
+    // Referencia: nombres y límites de Esri (rápido) + costa de EUMETSAT (una imagen por vista)
     const costa = L.layerGroup([
-      L.tileLayer.wms(WMS, { layers: 'backgrounds:ne_10m_coastline', format: 'image/png', transparent: true,
-        version: '1.3.0', pane: 'ref', tileSize: 512 }),
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-        { pane: 'ref', opacity: 0.8, attribution: 'Referencia &copy; Esri' }),
+        { pane: 'ref', opacity: 0.85, attribution: 'Referencia &copy; Esri' }),
     ]).addTo(map);
+    let costaImg = null;
     map.attributionControl.addAttribution('Imágenes &copy; EUMETSAT (EUMETView)');
 
-    const S = { canal: CANALES[0], frames: [], times: [], i: 0, timer: null, frp: null, cargados: 0 };
+    const S = { canal: CANALES[0], frames: [], times: [], estado: [], i: 0, timer: null, gen: 0 };
 
     // lista de canales
     const box = $('canales');
@@ -134,51 +135,120 @@
       box.appendChild(lab);
     });
 
+    const listos = () => S.estado.map((e, k) => (e === 'ok' ? k : -1)).filter((k) => k >= 0);
+
     function etiqueta() {
       const t = S.times[S.i];
-      if (!t) return;
+      const ok = listos().length, n = S.times.length;
+      const err = S.estado.filter((e) => e === 'error').length;
+      if (!t || S.estado[S.i] !== 'ok') {
+        $('tlabel').innerHTML = S.estado.length && S.estado[n - 1] === 'error'
+          ? '<b>EUMETSAT no responde ahora mismo</b><br><small style="color:var(--ct-muted)">Se reintentará en unos minutos</small>'
+          : `<b>Cargando imágenes de EUMETSAT…</b><br><small style="color:var(--ct-muted)">${ok}/${n} fotogramas · su servidor tarda a veces hasta un minuto</small>`;
+        return;
+      }
       const edad = Math.round((Date.now() - t.getTime()) / 60e3);
-      $('tlabel').innerHTML = `<b>${fmtLocal(t)}</b> hora canaria · ${fmtUTC(t)} · ${fmtDia(t)}<br><small style="color:var(--ct-muted)">hace ${edad} min · fotograma ${S.i + 1}/${S.times.length}${S.cargados < S.times.length ? ` · cargando ${S.cargados}/${S.times.length}` : ''}</small>`;
+      $('tlabel').innerHTML = `<b>${fmtLocal(t)}</b> hora canaria · ${fmtUTC(t)} · ${fmtDia(t)}<br><small style="color:var(--ct-muted)">hace ${edad} min · ${ok < n ? `cargados ${ok}/${n}${err ? ` (${err} sin imagen)` : ''}` : `${n} fotogramas`}</small>`;
     }
 
     function mostrar(i) {
-      S.i = (i + S.frames.length) % S.frames.length;
-      S.frames.forEach((l, k) => l.setOpacity(k === S.i ? 1 : 0));
-      if (S.frp) S.frp.setParams({ time: S.times[S.i].toISOString() });
-      $('frame').value = S.i;
+      if (S.estado[i] !== 'ok') return;
+      S.i = i;
+      S.frames.forEach((l, k) => l && l.setOpacity(k === i ? 1 : 0));
+      $('frame').value = i;
       etiqueta();
+    }
+
+    function siguiente() {
+      const ok = listos();
+      if (!ok.length) return;
+      const pos = ok.indexOf(S.i);
+      mostrar(ok[(pos + 1) % ok.length]);
+    }
+
+    function urlWMS(capa, t, b, w, h, fmt) {
+      const p = map.options.crs.project;
+      const sw = p(b.getSouthWest()), ne = p(b.getNorthEast());
+      const q = new URLSearchParams({ service: 'WMS', version: '1.3.0', request: 'GetMap', layers: capa, styles: '',
+        format: fmt, transparent: 'true', crs: 'EPSG:3857', bbox: [sw.x, sw.y, ne.x, ne.y].join(','),
+        width: w, height: h });
+      if (t) q.set('time', t.toISOString());
+      return `${WMS}?${q}`;
+    }
+
+    function cargarImagen(url) {
+      return new Promise((ok, mal) => {
+        const img = new Image();
+        const to = setTimeout(() => { img.src = ''; mal(new Error('tiempo')); }, ESPERA_MAX);
+        img.onload = () => { clearTimeout(to); ok(); };
+        img.onerror = () => { clearTimeout(to); mal(new Error('error')); };
+        img.src = url;
+      });
+    }
+
+    // Pide todos los fotogramas para la vista actual (el más reciente primero)
+    function cargarVista() {
+      const gen = ++S.gen;
+      const c = S.canal;
+      const b = map.getBounds();
+      const sz = map.getSize();
+      const k = Math.min(1, 1400 / sz.x);   // como mucho 1400 px de ancho
+      const w = Math.round(sz.x * k), h = Math.round(sz.y * k);
+      S.frames.forEach((l) => l && map.removeLayer(l));
+      S.frames = S.times.map(() => null);
+      S.estado = S.times.map(() => 'pendiente');
+      etiqueta();
+      const cola = S.times.map((_, i) => S.times.length - 1 - i);   // del más reciente al más antiguo
+      const fmt = c.id.includes('rgb_') ? 'image/jpeg' : 'image/png';
+      const uno = async () => {
+        while (cola.length && gen === S.gen) {
+          const i = cola.shift();
+          const url = urlWMS(c.id, S.times[i], b, w, h, fmt);
+          try {
+            await cargarImagen(url);
+            if (gen !== S.gen) return;
+            S.frames[i] = L.imageOverlay(url, b, { pane: 'frames', opacity: 0, className: 'ct-frame' }).addTo(map);
+            S.estado[i] = 'ok';
+            if (S.estado[S.i] !== 'ok' || i === S.times.length - 1) mostrar(i);
+          } catch (e) {
+            if (gen === S.gen) S.estado[i] = 'error';
+          }
+          if (gen === S.gen) etiqueta();
+        }
+      };
+      for (let n = 0; n < SIMULTANEAS; n++) uno();
+      // costa de EUMETSAT para esta vista
+      if ($('costa').checked) {
+        const url = urlWMS('backgrounds:ne_10m_coastline', null, b, w, h, 'image/png');
+        cargarImagen(url).then(() => {
+          if (gen !== S.gen) return;
+          if (costaImg) map.removeLayer(costaImg);
+          costaImg = L.imageOverlay(url, b, { pane: 'ref', interactive: false }).addTo(map);
+        }).catch(() => {});
+      }
     }
 
     async function setCanal(c) {
       S.canal = c;
       $('canal').textContent = c.nombre;
       $('info').textContent = c.txt;
-      S.frames.forEach((l) => map.removeLayer(l));
-      S.frames = []; S.cargados = 0;
       const fin = (await ultimoInstante(c.id)) || floorTo(new Date(Date.now() - c.lag * 60e3), c.min);
       const n = Math.round((HORAS * 60) / c.min);
       S.times = Array.from({ length: n }, (_, k) => new Date(fin.getTime() - (n - 1 - k) * c.min * 60e3));
+      S.i = n - 1;
       $('sub').textContent = `Últimas ${HORAS} horas · ${c.sat === 'MTG' ? 'Meteosat Tercera Generación (MTG-I)' : 'Meteosat Segunda Generación (MSG)'} · EUMETSAT`;
-      S.frames = S.times.map((t) => {
-        const l = L.tileLayer.wms(WMS, {
-          layers: c.id, format: 'image/png', transparent: true, version: '1.3.0', pane: 'frames',
-          time: t.toISOString(), tileSize: 512, opacity: 0, className: 'ct-frame',
-        });
-        l.once('load', () => { S.cargados++; etiqueta(); });
-        return l.addTo(map);
-      });
       $('frame').max = n - 1;
-      mostrar(n - 1);
-      if (S.timer) arrancar();
+      cargarVista();
     }
 
     function arrancar() {
       clearInterval(S.timer);
       S.timer = setInterval(() => {
         // pausa más larga en el último fotograma para que se vea la imagen más reciente
-        if (S.i === S.frames.length - 1 && !S.espera) { S.espera = true; return; }
+        const ok = listos();
+        if (S.i === ok[ok.length - 1] && !S.espera) { S.espera = true; return; }
         S.espera = false;
-        mostrar(S.i + 1);
+        siguiente();
       }, +$('vel').value);
       $('play').textContent = '❚❚';
     }
@@ -186,14 +256,19 @@
 
     $('play').onclick = () => (S.timer ? parar() : arrancar());
     $('vel').onchange = () => { if (S.timer) arrancar(); };
-    $('frame').oninput = (e) => { parar(); mostrar(+e.target.value); };
-    $('costa').onchange = (e) => (e.target.checked ? costa.addTo(map) : map.removeLayer(costa));
-    $('frp').onchange = (e) => {
-      if (e.target.checked) {
-        S.frp = L.tileLayer.wms(WMS, { layers: FRP.id, format: 'image/png', transparent: true, version: '1.3.0',
-          pane: 'frp', time: S.times[S.i].toISOString(), tileSize: 512 }).addTo(map);
-      } else if (S.frp) { map.removeLayer(S.frp); S.frp = null; }
+    $('frame').oninput = (e) => {
+      parar();
+      // ir al fotograma cargado más cercano
+      const v = +e.target.value, ok = listos();
+      if (ok.length) mostrar(ok.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a)));
     };
+    $('costa').onchange = (e) => {
+      if (e.target.checked) { costa.addTo(map); if (costaImg) costaImg.addTo(map); }
+      else { map.removeLayer(costa); if (costaImg) map.removeLayer(costaImg); }
+    };
+    // al mover o hacer zoom se piden de nuevo las imágenes para la vista nueva
+    let tMove = null;
+    map.on('moveend', () => { clearTimeout(tMove); tMove = setTimeout(cargarVista, 700); });
 
     // refresco: cada 10 min se recargan los fotogramas del canal actual
     setInterval(() => setCanal(S.canal), (opts.refreshMinutes || 10) * 60e3);

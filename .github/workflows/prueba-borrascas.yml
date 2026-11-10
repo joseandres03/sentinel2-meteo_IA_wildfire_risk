@@ -19,10 +19,10 @@ jobs:
           cat > /tmp/cfg.json <<'J'
           {"prueba": {"name": "Prueba (baja 973 hPa)", "active": true,
             "seed": {"time": "2026-11-10T00:00Z", "lat": 46.2, "lon": -18.8},
-            "domain": [15, 60, -50, 10], "max_lead_h": 120, "keep_runs": 6,
+            "domain": [15, 60, -50, 10], "max_lead_h": 120, "keep_runs": 3,
             "models": ["ECMWF", "ECMWF-ENS", "AIFS", "GFS", "GEFS"]}}
           J
-          time python src/trayectorias.py --config /tmp/cfg.json --minutos 28 --out /tmp/out 2>&1 | grep -v "DEBUG.*Starting new\\|DEBUG.*connectionpool" | tee /tmp/log.txt
+          time python src/trayectorias.py --config /tmp/cfg.json --minutos 28 --out /tmp/out --models ECMWF,ECMWF-ENS,GFS,GEFS,AIFS 2>&1 | grep -v "DEBUG.*Starting new\\|DEBUG.*connectionpool" | tee /tmp/log.txt
       - name: Resumen
         if: always()
         run: |
