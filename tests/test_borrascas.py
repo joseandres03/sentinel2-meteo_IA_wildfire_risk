@@ -63,7 +63,43 @@ def test_extremo_a_extremo_con_datos_sinteticos(tmp_path):
     from borrascas import demo
     demo.main(str(tmp_path))
     idx = json.loads((tmp_path / "demo" / "index.json").read_text())
-    assert len(idx["runs"]) == 5 and len(idx["observed"]) == 5
+    # la trayectoria real se reconstruye hacia atrás hasta que se forma la borrasca (T0-18 h)
+    assert idx["observed"][0]["t"] == "2026-11-07T06:00Z"
+    assert idx["observed"][-1]["t"] == "2026-11-10T00:00Z"
+    assert len(idx["runs"]) == 11
     run = json.loads((tmp_path / "demo" / idx["runs"][-1]["file"]).read_text())
     assert run["models"]["ECMWF-ENS"]["found"] == 51
     assert run["models"]["GEFS"]["canarias"]["300"] > 0
+
+
+def test_posicion_real_interpolada():
+    from borrascas.generar import parse_time, pos_en
+    obs = [{"t": "2026-11-10T00:00Z", "lat": 30.0, "lon": -20.0}, {"t": "2026-11-10T06:00Z", "lat": 29.0, "lon": -19.0}]
+    assert pos_en(obs, parse_time("2026111003")) == (29.5, -19.5)
+    assert pos_en(obs, parse_time("2026111012")) is None
+
+
+class _Resp:
+    def __init__(self, text):
+        self.text = text
+
+
+def test_indice_ecmwf_y_noaa(monkeypatch):
+    from borrascas import fuentes
+    ecmwf = "\n".join([
+        '{"param": "2t", "type": "cf", "_offset": 0, "_length": 10}',
+        '{"param": "msl", "type": "cf", "_offset": 10, "_length": 5}',
+        '{"param": "msl", "type": "pf", "number": "7", "_offset": 15, "_length": 5}',
+    ])
+    noaa = "1:0:d=2026111000:HGT:1000 mb:anl:\n2:120:d=2026111000:PRMSL:mean sea level:anl:\n3:300:d=2026111000:TMP:2 m:anl:"
+    monkeypatch.setattr(fuentes, "http_get", lambda url, **kw: _Resp(ecmwf if url.endswith(".index") else noaa))
+    assert fuentes._ecmwf_trozos_msl("x/f.grib2", None) == [(0, (10, 14)), (7, (15, 19))]
+    assert fuentes._noaa_rango("x/gfs.f000", None) == (120, 299)
+
+
+def test_urls_ecmwf():
+    from datetime import datetime, timezone
+    from borrascas.fuentes import _ecmwf_url
+    r = datetime(2026, 11, 10, 6, tzinfo=timezone.utc)
+    assert _ecmwf_url("B", r, "ifs", False, 24).endswith("20261110/06z/ifs/0p25/scda/20261110060000-24h-scda-fc.grib2")
+    assert _ecmwf_url("B", r, "ifs", True, 24).endswith("20261110/06z/ifs/0p25/enfo/20261110060000-24h-enfo-ef.grib2")

@@ -1,0 +1,36 @@
+# TEMPORAL: prueba con datos reales en la rama de desarrollo (se borra antes del PR)
+name: Prueba borrascas (rama)
+on:
+  push:
+    branches: [borrascas-v2-satelite]
+jobs:
+  prueba:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install numpy scipy requests eccodes
+      - name: Ejecutar (datos reales)
+        run: |
+          rm -rf docs/datos_borrascas
+          time python src/trayectorias.py --minutos 28 --out /tmp/out -v 2>&1 | grep -v "DEBUG.*Starting new\\|DEBUG.*connectionpool" | tee /tmp/log.txt
+      - name: Resumen
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, glob
+          for f in glob.glob('/tmp/out/*/index.json'):
+              i = json.load(open(f))
+              print(f, 'observed:', [(o['t'], o['lat'], o['lon'], o['p']) for o in i['observed']])
+              for r in i['runs']:
+                  d = json.load(open(f.replace('index.json', r['file'])))
+                  print(r['id'], {k: (m['found'], m['total'], m['members'][0]['track'][:1], m['members'][0]['track'][-1:]) for k, m in d['models'].items()})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: salida
+          path: /tmp/out

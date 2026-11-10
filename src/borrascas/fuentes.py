@@ -1,40 +1,106 @@
 """
-Descarga y lectura de MSLP de cada modelo.
+Descarga de la presión a nivel del mar (MSLP) de cada modelo.
 
-Todas las fuentes son abiertas y gratuitas:
-  * ECMWF Open Data  (IFS determinista, ENS 51 miembros, AIFS, AIFS-ENS)
-      paquete `ecmwf-opendata`, servido desde el bucket de AWS/Azure/GCP o ECMWF.
-  * NOAA GFS y GEFS (31 miembros) desde el bucket público de AWS (NODD),
-      descargando SÓLO el campo PRMSL de cada fichero mediante rangos de bytes
-      (.idx), así que cada descarga pesa unos cientos de KB.
+Todas las fuentes son abiertas y gratuitas y se leen igual: cada fichero GRIB2
+publicado tiene al lado un índice (.index en ECMWF, .idx en NOAA) con la
+posición de cada campo, así que se pide SOLO el trozo de la presión con una
+petición HTTP de rango de bytes. Nada de librerías con reintentos eternos:
 
-Cada fetcher devuelve:  { miembro(int): { paso_h(int): campo_hPa(2D) } }, Grid
-ya recortado al dominio de la borrasca.
+  * Peticiones en paralelo, tiempo de espera corto y como mucho 3 reintentos.
+  * ECMWF: si un espejo falla (AWS, Azure, ECMWF, Google), se pasa al siguiente.
+  * Si el fichero aún no existe (404) se lanza NoPublicado, para reintentarlo
+    en la siguiente ejecución sin contarlo como error.
+  * Cada descarga respeta una hora límite (deadline) para que el trabajo nunca
+    se alargue: lo que no dé tiempo se queda pendiente para la siguiente vez.
+
+Cada fetch devuelve ({miembro: {paso_h: campo_hPa}}, Grid) recortado al dominio.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import tempfile
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 
 import numpy as np
 import requests
 
 from .tracker import Grid
 
-log = logging.getLogger("sources")
+log = logging.getLogger("borrascas.fuentes")
+
+TIMEOUT = (10, 60)          # (conexión, lectura) en segundos
+REINTENTOS = 3
+HILOS = int(os.environ.get("BORRASCAS_HILOS", "12"))
+
+
+class NoPublicado(Exception):
+    """El fichero todavía no está publicado (o ya no existe)."""
+
+
+class SinTiempo(Exception):
+    """Se ha alcanzado la hora límite de esta ejecución."""
+
+
+_local = threading.local()
+
+
+def _session() -> requests.Session:
+    s = getattr(_local, "s", None)
+    if s is None:
+        s = _local.s = requests.Session()
+        s.headers["User-Agent"] = "canarywildfirerisk.es (trayectorias de borrascas)"
+    return s
+
+
+def _check(deadline):
+    if deadline and time.monotonic() > deadline:
+        raise SinTiempo()
+
+
+def http_get(url, *, rango=None, deadline=None, head=False):
+    """GET (o HEAD) con reintentos cortos. 404/403 -> NoPublicado."""
+    headers = {"Range": f"bytes={rango[0]}-{rango[1]}"} if rango else {}
+    ultimo = None
+    for intento in range(REINTENTOS):
+        _check(deadline)
+        try:
+            fn = _session().head if head else _session().get
+            r = fn(url, headers=headers, timeout=TIMEOUT, allow_redirects=True)
+            if r.status_code in (403, 404):
+                raise NoPublicado(url)
+            r.raise_for_status()
+            return r
+        except NoPublicado:
+            raise
+        except requests.RequestException as e:
+            ultimo = e
+            espera = (2, 5, 10)[intento]
+            log.debug("reintento %d %s (%s)", intento + 1, url, e)
+            time.sleep(espera)
+    raise ultimo
+
 
 # --------------------------------------------------------------------------
-# Lectura GRIB genérica (eccodes)
+# Lectura GRIB (eccodes)
 # --------------------------------------------------------------------------
+
+_GRIB_LOCK = threading.Lock()
+
 
 def read_grib_messages(path: str, domain):
-    """Lee todos los mensajes MSLP de un GRIB, recortados a domain=(latS, latN, lonW, lonE).
+    """Lee los mensajes de un GRIB recortados a domain=(latS, latN, lonW, lonE).
     Devuelve lista de (miembro, paso, grid, campo_hPa)."""
-    import eccodes  # import diferido: sólo hace falta en producción
+    with _GRIB_LOCK:     # eccodes no garantiza ser seguro entre hilos
+        return _read_grib(path, domain)
+
+
+def _read_grib(path, domain):
+    import eccodes  # import diferido: solo hace falta en producción
 
     latS, latN, lonW, lonE = domain
     out = []
@@ -73,132 +139,243 @@ def read_grib_messages(path: str, domain):
     return out
 
 
-def _collect(msgs):
-    fields, grid = {}, None
-    for number, step, g, data in msgs:
-        fields.setdefault(number, {})[step] = data
-        grid = grid or g
-    return fields, grid
+def _descargar_trozos(trozos, domain, deadline, clave_override=None):
+    """trozos: lista de (clave, url, (ini, fin)). Descarga en paralelo y decodifica.
+    clave = (miembro, paso) o None (se usan los de dentro del GRIB).
+    Devuelve ({miembro: {paso: campo}}, grid, fallos)."""
+    fields, grid, fallos = {}, None, 0
+    with tempfile.TemporaryDirectory() as tmp:
+        def job(i, clave, url, rango):
+            data = http_get(url, rango=rango, deadline=deadline).content
+            p = os.path.join(tmp, f"{i}.grib2")
+            with open(p, "wb") as fh:
+                fh.write(data)
+            return clave, read_grib_messages(p, domain)
+
+        with ThreadPoolExecutor(HILOS) as ex:
+            futs = [ex.submit(job, i, c, u, r) for i, (c, u, r) in enumerate(trozos)]
+            for fut in futs:
+                try:
+                    clave, msgs = fut.result()
+                except SinTiempo:
+                    for f in futs:
+                        f.cancel()
+                    raise
+                except Exception as e:
+                    fallos += 1
+                    log.warning("descarga fallida: %s", e)
+                    continue
+                for number, step, g, data in msgs:
+                    mem, st = clave if clave else (number, step)
+                    fields.setdefault(mem, {})[st] = data
+                    grid = grid or g
+    return fields, grid, fallos
 
 
 # --------------------------------------------------------------------------
-# ECMWF Open Data
+# ECMWF Open Data (IFS, ENS, AIFS, AIFS-ENS)
 # --------------------------------------------------------------------------
 
-def fetch_ecmwf(run: datetime, steps, domain, *, model="ifs", ensemble=False,
-                source=None, workdir=None):
-    from ecmwf.opendata import Client
+ECMWF_ESPEJOS = {
+    "aws": "https://ecmwf-forecasts.s3.eu-central-1.amazonaws.com",
+    "azure": "https://ai4edataeuwest.blob.core.windows.net/ecmwf",
+    "ecmwf": "https://data.ecmwf.int/forecasts",
+    "google": "https://storage.googleapis.com/ecmwf-open-data",
+}
 
-    source = source or os.environ.get("ECMWF_SOURCE", "aws")
-    client = Client(source=source, model=model, resol="0p25")
-    if ensemble:
-        req = dict(stream="enfo", type=["cf", "pf"])
+
+def _orden_espejos():
+    pref = os.environ.get("ECMWF_SOURCE", "aws")
+    return [pref] + [k for k in ECMWF_ESPEJOS if k != pref]
+
+
+def _ecmwf_url(base, run: datetime, model, ens, step):
+    d, hh = run.strftime("%Y%m%d"), f"{run.hour:02d}"
+    if ens:
+        stream, typ = "enfo", "ef"
+    elif model == "ifs" and run.hour in (6, 18):
+        stream, typ = "scda", "fc"
     else:
-        req = dict(stream="oper" if run.hour in (0, 12) else "scda", type="fc")
-    with tempfile.TemporaryDirectory(dir=workdir) as tmp:
-        target = os.path.join(tmp, "msl.grib2")
-        client.retrieve(date=run.strftime("%Y%m%d"), time=run.hour, param="msl",
-                        step=list(steps), target=target, **req)
-        return _collect(read_grib_messages(target, domain))
+        stream, typ = "oper", "fc"
+    return f"{base}/{d}/{hh}z/{model}/0p25/{stream}/{d}{hh}0000-{step}h-{stream}-{typ}.grib2"
+
+
+def _ecmwf_trozos_msl(url, deadline):
+    """Lee el .index (JSON por línea) y devuelve los rangos de bytes de 'msl'."""
+    txt = http_get(url[:-6] + ".index", deadline=deadline).text
+    out = []
+    for line in txt.splitlines():
+        if not line.strip():
+            continue
+        e = json.loads(line)
+        if e.get("param") == "msl":
+            off, ln = int(e["_offset"]), int(e["_length"])
+            out.append((int(e.get("number", 0) or 0), (off, off + ln - 1)))
+    if not out:
+        raise NoPublicado(f"msl no está en {url}.index")
+    return out
+
+
+def fetch_ecmwf(run, steps, domain, *, model="ifs", ensemble=False, deadline=None):
+    ultimo_error = None
+    for espejo in _orden_espejos():
+        base = ECMWF_ESPEJOS[espejo]
+        try:
+            # índices de todos los pasos (en paralelo); de cada uno, los trozos msl
+            def idx(step):
+                url = _ecmwf_url(base, run, model, ensemble, step)
+                return [((num, step), url, r) for num, r in _ecmwf_trozos_msl(url, deadline)]
+            with ThreadPoolExecutor(min(HILOS, len(steps))) as ex:
+                trozos = [t for lst in ex.map(idx, steps) for t in lst]
+            fields, grid, fallos = _descargar_trozos(trozos, domain, deadline)
+            if grid is None:
+                raise RuntimeError("sin campos válidos")
+            log.info("    %s %s: %d campos desde %s (%d fallos)", model, "ENS" if ensemble else "det",
+                     len(trozos) - fallos, espejo, fallos)
+            return fields, grid
+        except (SinTiempo, NoPublicado):
+            raise
+        except Exception as e:
+            ultimo_error = e
+            log.warning("    espejo %s falló (%s); probando el siguiente", espejo, e)
+    raise RuntimeError(f"todos los espejos de ECMWF fallaron: {ultimo_error}")
+
+
+def publicado_ecmwf(run, last_step, *, model="ifs", ensemble=False, deadline=None):
+    for espejo in _orden_espejos():
+        url = _ecmwf_url(ECMWF_ESPEJOS[espejo], run, model, ensemble, last_step)
+        try:
+            http_get(url[:-6] + ".index", head=True, deadline=deadline)
+            return True
+        except NoPublicado:
+            return False          # 404 en un espejo sano: aún no está
+        except (requests.RequestException, OSError):
+            continue              # espejo caído: probar otro
+    return False
 
 
 # --------------------------------------------------------------------------
-# NOAA GFS / GEFS (AWS NODD + rangos de bytes del .idx)
+# NOAA GFS / GEFS (buckets públicos de NOAA en AWS)
 # --------------------------------------------------------------------------
 
 GFS_URL = ("https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.{d}/{hh}/atmos/"
            "gfs.t{hh}z.pgrb2.0p25.f{fff}")
 GEFS_URL = ("https://noaa-gefs-pds.s3.amazonaws.com/gefs.{d}/{hh}/atmos/pgrb2ap5/"
             "{mem}.t{hh}z.pgrb2a.0p50.f{fff}")
+_PRMSL = ":PRMSL:mean sea level:"
 
-_session = requests.Session()
+
+def _noaa_rango(url, deadline):
+    lines = http_get(url + ".idx", deadline=deadline).text.strip().splitlines()
+    for k, line in enumerate(lines):
+        if _PRMSL in line:
+            ini = int(line.split(":")[1])
+            fin = int(lines[k + 1].split(":")[1]) - 1 if k + 1 < len(lines) else ""
+            return ini, fin
+    raise NoPublicado(f"PRMSL no está en {url}.idx")
 
 
-def _get_field_by_idx(url: str, var=":PRMSL:mean sea level:", retries=3) -> bytes:
-    for attempt in range(retries):
+def _fetch_noaa(urls: dict, domain, deadline):
+    """urls: {(miembro, paso): url}. Primero los .idx (en paralelo), luego los rangos."""
+    def idx(item):
+        clave, url = item
         try:
-            idx = _session.get(url + ".idx", timeout=30)
-            idx.raise_for_status()
-            lines = idx.text.strip().splitlines()
-            for k, line in enumerate(lines):
-                if var in line:
-                    start = int(line.split(":")[1])
-                    end = int(lines[k + 1].split(":")[1]) - 1 if k + 1 < len(lines) else ""
-                    r = _session.get(url, headers={"Range": f"bytes={start}-{end}"}, timeout=60)
-                    r.raise_for_status()
-                    return r.content
-            raise KeyError(f"{var} no encontrado en {url}.idx")
-        except (requests.RequestException, KeyError) as e:
-            if attempt == retries - 1:
-                raise
-            log.warning("reintento %s (%s)", url, e)
-            time.sleep(3 * (attempt + 1))
-
-
-def _fetch_noaa(urls: dict, domain, workdir=None, workers=8):
-    """urls: {(miembro, paso): url}"""
-    fields, grid = {}, None
-    with tempfile.TemporaryDirectory(dir=workdir) as tmp:
-        def job(key, url):
-            data = _get_field_by_idx(url)
-            p = os.path.join(tmp, f"{key[0]}_{key[1]}.grib2")
-            with open(p, "wb") as fh:
-                fh.write(data)
-            return key, p
-
-        with ThreadPoolExecutor(workers) as ex:
-            futs = [ex.submit(job, k, u) for k, u in urls.items()]
-            for fut in as_completed(futs):
-                try:
-                    (mem, step), p = fut.result()
-                except Exception as e:  # un fichero que falte no tumba todo
-                    log.warning("NOAA: %s", e)
-                    continue
-                for _, _, g, data in read_grib_messages(p, domain):
-                    fields.setdefault(mem, {})[step] = data
-                    grid = grid or g
+            return clave, url, _noaa_rango(url, deadline)
+        except NoPublicado:
+            return None
+    with ThreadPoolExecutor(HILOS) as ex:
+        trozos = [t for t in ex.map(idx, urls.items()) if t]
+    if not trozos:
+        raise NoPublicado("ningún fichero NOAA publicado")
+    fields, grid, fallos = _descargar_trozos(trozos, domain, deadline)
+    if grid is None:
+        raise RuntimeError("sin campos válidos")
+    log.info("    NOAA: %d campos (%d no publicados, %d fallos)", len(trozos) - fallos,
+             len(urls) - len(trozos), fallos)
     return fields, grid
 
 
-def fetch_gfs(run: datetime, steps, domain, workdir=None):
-    d, hh = run.strftime("%Y%m%d"), f"{run.hour:02d}"
-    urls = {(0, s): GFS_URL.format(d=d, hh=hh, fff=f"{s:03d}") for s in steps}
-    return _fetch_noaa(urls, domain, workdir)
+def _gfs(run, s):
+    return GFS_URL.format(d=run.strftime("%Y%m%d"), hh=f"{run.hour:02d}", fff=f"{s:03d}")
 
 
-def fetch_gefs(run: datetime, steps, domain, workdir=None, n_members=30):
-    d, hh = run.strftime("%Y%m%d"), f"{run.hour:02d}"
-    urls = {}
-    for m in range(n_members + 1):
-        mem = "gec00" if m == 0 else f"gep{m:02d}"
-        for s in steps:
-            urls[(m, s)] = GEFS_URL.format(d=d, hh=hh, mem=mem, fff=f"{s:03d}")
-    return _fetch_noaa(urls, domain, workdir)
+def _gefs(run, m, s):
+    mem = "gec00" if m == 0 else f"gep{m:02d}"
+    return GEFS_URL.format(d=run.strftime("%Y%m%d"), hh=f"{run.hour:02d}", mem=mem, fff=f"{s:03d}")
+
+
+def fetch_gfs(run, steps, domain, deadline=None):
+    return _fetch_noaa({(0, s): _gfs(run, s) for s in steps}, domain, deadline)
+
+
+def fetch_gefs(run, steps, domain, deadline=None, n_members=30):
+    return _fetch_noaa({(m, s): _gefs(run, m, s) for m in range(n_members + 1) for s in steps},
+                       domain, deadline)
+
+
+def publicado_url(url, deadline=None):
+    try:
+        http_get(url, head=True, deadline=deadline)
+        return True
+    except (NoPublicado, requests.RequestException):
+        return False
+
+
+def fetch_analisis_gfs(tiempos: list[datetime], domain, deadline=None):
+    """Análisis del GFS (f000) en varios instantes: {instante: campo}, grid.
+    Es lo que se usa para la trayectoria real de la borrasca."""
+    urls = {(t, 0): _gfs(t, 0) for t in tiempos}
+    fields, grid = _fetch_noaa(urls, domain, deadline)
+    return {t: d[0] for t, d in fields.items() if 0 in d}, grid
+
+
+def ultimo_analisis_gfs(desde: datetime, hasta: datetime, deadline=None):
+    """Último instante (cada 6 h, <= hasta) con análisis GFS publicado."""
+    t = hasta.replace(hour=hasta.hour - hasta.hour % 6, minute=0, second=0, microsecond=0)
+    while t >= desde:
+        if publicado_url(_gfs(t, 0) + ".idx", deadline):
+            return t
+        t -= timedelta(hours=6)
+    return None
 
 
 # --------------------------------------------------------------------------
 # Catálogo de modelos
 # --------------------------------------------------------------------------
-# step: intervalo en horas entre salidas usadas para el seguimiento.
-# Para los ENS de ECMWF se usa 12 h por defecto para reducir la descarga
-# (51 miembros x campos globales). Bájalo a 6 h si tu servidor lo aguanta.
+# step: intervalo (h) entre los campos usados para el seguimiento.
+# max_lead: plazo máximo que publica el modelo en cada pasada {hora: h}.
+# Los ENS de ECMWF van cada 12 h para no multiplicar la descarga (51 campos
+# globales por paso; ECMWF no permite recortar por zona).
 
+def _m(label, kind, color, step, fetch, publicado, max_lead, parent=None, defecto=True):
+    return dict(label=label, kind=kind, color=color, step=step, fetch=fetch, publicado=publicado,
+                max_lead=max_lead, parent=parent, defecto=defecto)
+
+
+_4 = {0: 360, 6: 360, 12: 360, 18: 360}
 MODELS = {
-    "ECMWF": dict(label="ECMWF IFS", kind="deterministic", color="#ff4d4d", step=6,
-                  fetch=lambda run, steps, dom, **kw: fetch_ecmwf(run, steps, dom, model="ifs", **kw)),
-    "ECMWF-ENS": dict(label="ECMWF ENS (51)", kind="ensemble", color="#ff9a9a", step=12,
-                      parent="ECMWF",
-                      fetch=lambda run, steps, dom, **kw: fetch_ecmwf(run, steps, dom, model="ifs",
-                                                                      ensemble=True, **kw)),
-    "AIFS": dict(label="ECMWF AIFS (IA)", kind="deterministic", color="#c77dff", step=6,
-                 fetch=lambda run, steps, dom, **kw: fetch_ecmwf(run, steps, dom, model="aifs-single", **kw)),
-    "AIFS-ENS": dict(label="ECMWF AIFS-ENS (51)", kind="ensemble", color="#dcb6ff", step=12,
-                     parent="AIFS",
-                     fetch=lambda run, steps, dom, **kw: fetch_ecmwf(run, steps, dom, model="aifs-ens",
-                                                                     ensemble=True, **kw)),
-    "GFS": dict(label="NOAA GFS", kind="deterministic", color="#3da5ff", step=6,
-                fetch=lambda run, steps, dom, **kw: fetch_gfs(run, steps, dom, **kw)),
-    "GEFS": dict(label="NOAA GEFS (31)", kind="ensemble", color="#8fd0ff", step=6,
-                 parent="GFS",
-                 fetch=lambda run, steps, dom, **kw: fetch_gefs(run, steps, dom, **kw)),
+    "ECMWF": _m("ECMWF IFS", "deterministic", "#ff4d4d", 6,
+                lambda r, s, d, dl: fetch_ecmwf(r, s, d, model="ifs", deadline=dl),
+                lambda r, last, dl: publicado_ecmwf(r, last, model="ifs", deadline=dl),
+                {0: 240, 6: 90, 12: 240, 18: 90}),
+    "ECMWF-ENS": _m("ECMWF ENS (51)", "ensemble", "#ff9a9a", 12,
+                    lambda r, s, d, dl: fetch_ecmwf(r, s, d, model="ifs", ensemble=True, deadline=dl),
+                    lambda r, last, dl: publicado_ecmwf(r, last, model="ifs", ensemble=True, deadline=dl),
+                    {0: 360, 6: 144, 12: 360, 18: 144}, parent="ECMWF"),
+    "AIFS": _m("ECMWF AIFS (IA)", "deterministic", "#c77dff", 6,
+               lambda r, s, d, dl: fetch_ecmwf(r, s, d, model="aifs-single", deadline=dl),
+               lambda r, last, dl: publicado_ecmwf(r, last, model="aifs-single", deadline=dl),
+               _4),
+    "AIFS-ENS": _m("ECMWF AIFS-ENS (51)", "ensemble", "#dcb6ff", 12,
+                   lambda r, s, d, dl: fetch_ecmwf(r, s, d, model="aifs-ens", ensemble=True, deadline=dl),
+                   lambda r, last, dl: publicado_ecmwf(r, last, model="aifs-ens", ensemble=True, deadline=dl),
+                   _4, parent="AIFS", defecto=False),
+    "GFS": _m("NOAA GFS", "deterministic", "#3da5ff", 6,
+              lambda r, s, d, dl: fetch_gfs(r, s, d, deadline=dl),
+              lambda r, last, dl: publicado_url(_gfs(r, last) + ".idx", dl),
+              {0: 384, 6: 384, 12: 384, 18: 384}),
+    "GEFS": _m("NOAA GEFS (31)", "ensemble", "#8fd0ff", 6,
+               lambda r, s, d, dl: fetch_gefs(r, s, d, deadline=dl),
+               lambda r, last, dl: publicado_url(_gefs(r, 30, last) + ".idx", dl),
+               {0: 384, 6: 384, 12: 384, 18: 384}, parent="GFS"),
 }
