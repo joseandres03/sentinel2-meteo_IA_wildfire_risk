@@ -13,15 +13,15 @@ const configWeb = {
             ],
             "fecha_sat": "2026-11-15",
             "n_parches": 2097,
-            "riesgo_max": 0.4507,
+            "riesgo_max": 0.4657,
             "tiempos": {
-                "descarga_satelite_s": 35.7,
+                "descarga_satelite_s": 20.8,
                 "preprocesado_s": 0.9,
                 "descarga_meteo_s": 0.1,
-                "inferencia_s": 3.5,
-                "exportacion_s": 2.3
+                "inferencia_s": 1.8,
+                "exportacion_s": 1.9
             },
-            "actualizado": "2026-11-17 06:43"
+            "actualizado": "2026-11-18 06:01"
         },
         "Tenerife": {
             "bounds": [
@@ -36,15 +36,15 @@ const configWeb = {
             ],
             "fecha_sat": "2026-11-15",
             "n_parches": 17921,
-            "riesgo_max": 0.4664,
+            "riesgo_max": 0.4741,
             "tiempos": {
-                "descarga_satelite_s": 101.4,
-                "preprocesado_s": 4.1,
+                "descarga_satelite_s": 72.0,
+                "preprocesado_s": 3.4,
                 "descarga_meteo_s": 0.1,
-                "inferencia_s": 15.5,
-                "exportacion_s": 16.3
+                "inferencia_s": 11.0,
+                "exportacion_s": 13.5
             },
-            "actualizado": "2026-11-17 06:43"
+            "actualizado": "2026-11-18 06:01"
         },
         "Gran Canaria": {
             "bounds": [
@@ -59,15 +59,15 @@ const configWeb = {
             ],
             "fecha_sat": "2026-11-15",
             "n_parches": 7547,
-            "riesgo_max": 0.521,
+            "riesgo_max": 0.5239,
             "tiempos": {
-                "descarga_satelite_s": 31.0,
-                "preprocesado_s": 2.0,
-                "descarga_meteo_s": 0.3,
-                "inferencia_s": 7.6,
-                "exportacion_s": 7.5
+                "descarga_satelite_s": 58.7,
+                "preprocesado_s": 1.8,
+                "descarga_meteo_s": 0.1,
+                "inferencia_s": 4.5,
+                "exportacion_s": 6.3
             },
-            "actualizado": "2026-11-17 06:43"
+            "actualizado": "2026-11-18 06:01"
         },
         "La Palma": {
             "bounds": [
@@ -82,15 +82,15 @@ const configWeb = {
             ],
             "fecha_sat": "2026-11-15",
             "n_parches": 3881,
-            "riesgo_max": 0.4468,
+            "riesgo_max": 0.4341,
             "tiempos": {
-                "descarga_satelite_s": 60.3,
-                "preprocesado_s": 1.3,
-                "descarga_meteo_s": 0.2,
-                "inferencia_s": 4.6,
-                "exportacion_s": 4.4
+                "descarga_satelite_s": 92.6,
+                "preprocesado_s": 1.2,
+                "descarga_meteo_s": 0.1,
+                "inferencia_s": 2.6,
+                "exportacion_s": 3.6
             },
-            "actualizado": "2026-11-17 06:43"
+            "actualizado": "2026-11-18 06:01"
         },
         "El Hierro": {
             "bounds": [
@@ -105,15 +105,15 @@ const configWeb = {
             ],
             "fecha_sat": "2026-11-15",
             "n_parches": 2496,
-            "riesgo_max": 0.4382,
+            "riesgo_max": 0.4441,
             "tiempos": {
-                "descarga_satelite_s": 74.9,
-                "preprocesado_s": 1.0,
-                "descarga_meteo_s": 0.1,
-                "inferencia_s": 2.8,
-                "exportacion_s": 2.8
+                "descarga_satelite_s": 159.2,
+                "preprocesado_s": 0.9,
+                "descarga_meteo_s": 0.2,
+                "inferencia_s": 1.8,
+                "exportacion_s": 2.3
             },
-            "actualizado": "2026-11-17 06:43"
+            "actualizado": "2026-11-18 06:01"
         },
         "Lanzarote": {
             "bounds": [
@@ -128,15 +128,15 @@ const configWeb = {
             ],
             "fecha_sat": "2026-11-12",
             "n_parches": 8042,
-            "riesgo_max": 0.4626,
+            "riesgo_max": 0.4543,
             "tiempos": {
-                "descarga_satelite_s": 44.2,
-                "preprocesado_s": 2.2,
+                "descarga_satelite_s": 53.1,
+                "preprocesado_s": 2.0,
                 "descarga_meteo_s": 0.1,
-                "inferencia_s": 7.7,
-                "exportacion_s": 8.4
+                "inferencia_s": 4.8,
+                "exportacion_s": 6.9
             },
-            "actualizado": "2026-11-17 06:43"
+            "actualizado": "2026-11-18 06:01"
         },
         "Fuerteventura": {
             "bounds": [
@@ -150,17 +150,17 @@ const configWeb = {
                 ]
             ],
             "fecha_sat": "2026-11-12",
-            "n_parches": 16462,
-            "riesgo_max": 0.4862,
+            "n_parches": 16461,
+            "riesgo_max": 0.4873,
             "tiempos": {
-                "descarga_satelite_s": 92.6,
-                "preprocesado_s": 3.9,
+                "descarga_satelite_s": 112.5,
+                "preprocesado_s": 3.3,
                 "descarga_meteo_s": 0.1,
-                "inferencia_s": 14.2,
-                "exportacion_s": 17.4
+                "inferencia_s": 9.5,
+                "exportacion_s": 15.3
             },
-            "actualizado": "2026-11-17 06:43"
+            "actualizado": "2026-11-18 06:01"
         }
     },
-    "fecha_actualizacion": "2026-11-17 06:43"
+    "fecha_actualizacion": "2026-11-18 06:01"
 };
